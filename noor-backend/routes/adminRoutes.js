@@ -8,6 +8,10 @@ router.get('/approvals', verifyToken, isAdmin, adminController.getPendingApprova
 router.get('/completed-tasks', verifyToken, isAdmin, adminController.getCompletedTasksStats);
 router.get('/completed-tasks-list', verifyToken, isAdmin, adminController.getCompletedTasks);
 
+// Overall Report Route
+const reportController = require('../controllers/reportController');
+router.get('/overall-report', verifyToken, isAdmin, reportController.getOverallReport);
+
 
 
 module.exports = router;

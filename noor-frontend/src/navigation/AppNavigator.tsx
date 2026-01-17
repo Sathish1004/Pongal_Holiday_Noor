@@ -41,6 +41,7 @@ const AppNavigator: React.FC = () => {
                     // Admin logged in
                     <>
                         <Stack.Screen name="AdminDashboard" component={AdminDashboardScreen} />
+                        <Stack.Screen name="OverallReport" component={require('../screens/OverallReportScreen').default} />
                         <Stack.Screen name="SiteManagement" component={SiteManagementScreen} />
                         <Stack.Screen name="TaskManagement" component={TaskManagementScreen} />
                         <Stack.Screen name="StageProgress" component={StageProgressScreen} />

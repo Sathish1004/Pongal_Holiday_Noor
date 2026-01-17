@@ -4239,6 +4239,24 @@ Project Team`;
                   </TouchableOpacity>
                 </View>
 
+                {/* 3. THIRD ROW: Overall Report */}
+                <View style={styles.metricsRow}>
+                  <TouchableOpacity
+                    style={[styles.metricCard, { backgroundColor: '#F0F9FF', borderColor: '#BAE6FD', borderWidth: 1 }]}
+                    onPress={() => navigation.navigate("OverallReport")}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                      <View style={{ padding: 8, backgroundColor: '#fff', borderRadius: 8 }}>
+                        <Ionicons name="bar-chart-outline" size={24} color="#0284C7" />
+                      </View>
+                      <Text style={[styles.metricLabel, { marginBottom: 0, color: '#0369A1' }]}>Overall Report</Text>
+                    </View>
+                    <Text style={[styles.metricSubText, { color: '#0C4A6E' }]}>
+                      View comprehensive company status, financials, and project summaries.
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
                 {/* 3. DETAILED METRICS GRID */}
 
                 {/* Keep Active Projects List below if space? or Hide it? 
