@@ -1,0 +1,3 @@
+Attempting to drop Foreign Key task_messages_ibfk_2 on task_messages...
+Error dropping FK: Can't DROP 'task_messages_ibfk_2'; check that column/key exists
+Database fix complete.

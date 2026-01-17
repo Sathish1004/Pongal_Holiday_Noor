@@ -1,0 +1,13 @@
+CREATE TABLE `task_messages` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `task_id` int NOT NULL,
+  `sender_id` int NOT NULL,
+  `type` enum('text','image','audio','document') DEFAULT 'text',
+  `content` text,
+  `media_url` varchar(500) DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `task_id` (`task_id`),
+  KEY `sender_id` (`sender_id`),
+  CONSTRAINT `task_messages_ibfk_1` FOREIGN KEY (`task_id`) REFERENCES `tasks` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=32 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
