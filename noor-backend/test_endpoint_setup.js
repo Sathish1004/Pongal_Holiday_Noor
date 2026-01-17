@@ -6,7 +6,7 @@ async function testEndpoint() {
     // 1. Login to get token
     console.log("Logging in...");
     const loginRes = await axios.post(
-      "https://noorbuilders.com/api/auth/login",
+      "http://localhost:5000/api/auth/login",
       {
         email: "admin@test.com", // Replace with valid admin email
         password: "password123", // Replace with valid admin password
@@ -19,7 +19,7 @@ async function testEndpoint() {
     console.log("Calling Add File Endpoint...");
     const siteId = 2; // Chennai
     const res = await axios.post(
-      `https://noorbuilders.com/api/sites/${siteId}/files`,
+      `http://localhost:5000/api/sites/${siteId}/files`,
       {
         url: "/uploads/test-debug-endpoint.jpg",
         type: "image",

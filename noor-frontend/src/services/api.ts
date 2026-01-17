@@ -46,10 +46,10 @@ import { Platform } from "react-native";
 
 // ✅ PRODUCTION BACKEND URL (AWS)
 // const PROD_API_URL = "https://noorclient.prolync.in/api";
-const PROD_API_URL = "https://noorbuilders.com/api";
+const PROD_API_URL = "http://localhost:5000/api";
 
 // ✅ Optional: local dev URL (ONLY for local testing)
-const DEV_API_URL = "https://noorbuilders.com";
+const DEV_API_URL = "http://localhost:5000";
 
 // ✅ Decide API based on environment
 const getApiUrl = () => {

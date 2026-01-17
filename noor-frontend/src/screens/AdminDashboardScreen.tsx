@@ -4826,7 +4826,7 @@ Project Team`;
                                       source={{
                                         uri: file.url.startsWith("http")
                                           ? file.url
-                                          : `https://noorbuilders.com/${file.url}`,
+                                          : `http://localhost:5000/${file.url}`,
                                       }}
                                       style={{ width: "100%", height: "100%" }}
                                       resizeMode="cover"
@@ -6977,16 +6977,16 @@ Project Team`;
                             style={{
                               height: "100%",
                               width: `${projectTasks.length > 0
-                                  ? Math.round(
-                                    (projectTasks.filter(
-                                      (t) =>
-                                        t.status === "Completed" ||
-                                        t.status === "completed"
-                                    ).length /
-                                      projectTasks.length) *
-                                    100
-                                  )
-                                  : 0
+                                ? Math.round(
+                                  (projectTasks.filter(
+                                    (t) =>
+                                      t.status === "Completed" ||
+                                      t.status === "completed"
+                                  ).length /
+                                    projectTasks.length) *
+                                  100
+                                )
+                                : 0
                                 }%`,
                               backgroundColor: "#166534",
                               borderRadius: 6,
