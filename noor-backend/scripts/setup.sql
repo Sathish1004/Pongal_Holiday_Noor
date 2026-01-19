@@ -48,15 +48,32 @@ CREATE TABLE IF NOT EXISTS site_assignments (
     FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE
 );
 
+-- Milestones table (NEW)
+CREATE TABLE IF NOT EXISTS milestones (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    site_id INT NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    status ENUM('Not Started', 'In Progress', 'Completed', 'Delayed') DEFAULT 'Not Started',
+    progress INT DEFAULT 0,
+    planned_start_date DATE,
+    planned_end_date DATE,
+    actual_completion_date DATE,
+    delay_reason TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE
+);
+
 -- Phases table (construction phases per site)
 CREATE TABLE IF NOT EXISTS phases (
     id INT AUTO_INCREMENT PRIMARY KEY,
     site_id INT NOT NULL,
+    milestone_id INT,
     name VARCHAR(255) NOT NULL,
     order_num INT DEFAULT 1,
     status ENUM('pending', 'in_progress', 'completed') DEFAULT 'pending',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE
+    FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE,
+    FOREIGN KEY (milestone_id) REFERENCES milestones(id) ON DELETE SET NULL
 );
 
 -- Tasks table (enhanced with amount and phase)

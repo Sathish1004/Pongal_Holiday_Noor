@@ -235,6 +235,58 @@ exports.getOverallReport = async (req, res) => {
                 (SELECT MAX(created_at) FROM task_updates) as last_employee_update
         `);
 
+        // --- J. Milestones Summary (NEW) ---
+        const [milestones] = await db.query(`
+            SELECT m.*, s.name as site_name,
+            (
+                SELECT 
+                    CASE WHEN COUNT(t.id) > 0 
+                    THEN ROUND((SUM(CASE WHEN t.status = 'completed' OR t.status = 'Completed' THEN 1 ELSE 0 END) / COUNT(t.id)) * 100)
+                    ELSE 0 END
+                FROM phases p
+                JOIN tasks t ON p.id = t.phase_id
+                WHERE p.milestone_id = m.id
+            ) as dynamic_progress,
+            (
+                SELECT MAX(t.completed_at)
+                FROM phases p
+                JOIN tasks t ON p.id = t.phase_id
+                WHERE p.milestone_id = m.id
+            ) as derived_completion_date
+            FROM milestones m
+            JOIN sites s ON m.site_id = s.id
+            WHERE 1=1 ${projectFilter.replace('s.', 'm.')} -- approximate filter map
+            ORDER BY m.planned_end_date ASC
+        `);
+
+        // Use dynamic_progress if available to ensure fresh data, 
+        // BUT trust the DB 'Completed' status OR if progress is already 100 (manual completion)
+        milestones.forEach(m => {
+            if (m.status === 'Completed' || m.progress === 100) {
+                m.progress = 100;
+                m.status = 'Completed'; // Ensure consistency for frontend
+            } else if (m.dynamic_progress !== null && m.dynamic_progress !== undefined) {
+                m.progress = m.dynamic_progress;
+            }
+        });
+
+        // Calculate progress for each if needed or trust DB 'progress'
+        // For report, we trust the 'progress' column which we update on read
+
+        const milestoneStats = {
+            total: milestones.length,
+            completed: milestones.filter(m => m.status === 'Completed').length,
+            delayed: milestones.filter(m => m.status === 'Delayed' || (m.status !== 'Completed' && new Date(m.planned_end_date) < new Date())).length,
+            in_progress: milestones.filter(m => m.status === 'In Progress').length,
+            latest_achievement_date: (() => {
+                const completed = milestones.filter(m => m.status === 'Completed' && m.actual_completion_date);
+                if (completed.length === 0) return null;
+                // Sort descending
+                completed.sort((a, b) => new Date(b.actual_completion_date) - new Date(a.actual_completion_date));
+                return completed[0].actual_completion_date;
+            })()
+        };
+
 
         const reportData = {
             generatedAt: new Date(),
@@ -290,6 +342,13 @@ exports.getOverallReport = async (req, res) => {
                 ...auditSummary[0],
                 last_admin_action: lastActions[0].last_admin_action || null,
                 last_employee_update: lastActions[0].last_employee_update || null
+            },
+            milestones: {
+                stats: milestoneStats,
+                list: milestones.map(m => ({
+                    ...m,
+                    is_delayed: m.status === 'Delayed' || (m.status !== 'Completed' && new Date(m.planned_end_date) < new Date())
+                }))
             }
 
         };

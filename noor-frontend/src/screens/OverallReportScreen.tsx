@@ -8,37 +8,133 @@ import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
 import CustomDatePicker from '../components/CustomDatePicker';
 
+// Helper to format YYYY-MM-DD safely without timezone shifts
+const formatDateSafe = (dateInput: any) => {
+    if (!dateInput) return '-';
+
+    // Handle Date object directly
+    if (dateInput instanceof Date) {
+        return dateInput.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    }
+
+    const dateStr = dateInput.toString();
+
+    // Handle ISO string or long string: take date part
+    const cleanDate = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
+    const parts = cleanDate.split('-');
+
+    // If we have YYYY-MM-DD
+    if (parts.length === 3) {
+        // Construct date as Local Time (h,m,s = 0) to avoid UTC shifts
+        const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+        return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    }
+
+    // Fallback for other formats (e.g. standard Date string)
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) {
+        return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    }
+
+    return '-';
+};
+
 const OverallReportScreen = ({ navigation }: any) => {
     const [loading, setLoading] = useState(true);
     const [reportData, setReportData] = useState<any>(null);
+    const [financialData, setFinancialData] = useState<any>(null); // NEW: Separate state for Financials
     const [fromDate, setFromDate] = useState<Date | null>(null);
     const [toDate, setToDate] = useState<Date | null>(null);
     const [showFromPicker, setShowFromPicker] = useState(false);
     const [showToPicker, setShowToPicker] = useState(false);
+
+    // Project Filter State (Moved to Local Financial Scope)
+    const [projects, setProjects] = useState<any[]>([]);
+    const [selectedProject, setSelectedProject] = useState<any | null>(null);
+    const [showProjectPicker, setShowProjectPicker] = useState(false);
 
     // Project collapsing state
     const [expandedProjects, setExpandedProjects] = useState<{ [key: number]: boolean }>({});
 
     useFocusEffect(
         useCallback(() => {
+            fetchProjects();
+        }, [])
+    );
+
+    // 1. Fetch MAIN Report (Company, Milestones, All Financials initially)
+    useFocusEffect(
+        useCallback(() => {
             fetchReportData();
         }, [fromDate, toDate])
     );
+
+    // 2. Fetch/Update FINANCIALS when Project Filter Changes
+    useFocusEffect(
+        useCallback(() => {
+            if (reportData) { // Only if report is loaded
+                fetchFinancials();
+            }
+        }, [selectedProject, reportData])
+    );
+
+    const fetchProjects = async () => {
+        try {
+            const response = await api.get('/sites');
+            setProjects(response.data.sites || []);
+        } catch (error) {
+            console.error('Error fetching sites:', error);
+        }
+    };
 
     const fetchReportData = async () => {
         setLoading(true);
         try {
             let query = '';
+            const params = [];
             if (fromDate && toDate) {
-                query = `?fromDate=${fromDate.toISOString().split('T')[0]}&toDate=${toDate.toISOString().split('T')[0]}`;
+                params.push(`fromDate=${fromDate.toISOString().split('T')[0]}`);
+                params.push(`toDate=${toDate.toISOString().split('T')[0]}`);
+            }
+            // NOTE: Global report does NOT use projectIds anymore (unless we want to filtering everything)
+            // The user wanted "Global" stats everywhere.
+
+            if (params.length > 0) {
+                query = `?${params.join('&')}`;
             }
             const response = await api.get(`/admin/overall-report${query}`);
             setReportData(response.data);
+
+            // Initialize Financial Data with Global Data if no project selected
+            if (!selectedProject) {
+                setFinancialData(response.data.financialSummary);
+            }
         } catch (error) {
             console.error('Error fetching report:', error);
             Alert.alert('Error', 'Failed to load report data');
         } finally {
             setLoading(false);
+        }
+    };
+
+    const fetchFinancials = async () => {
+        if (!selectedProject) {
+            // Reset to Global Financials from main report
+            if (reportData) setFinancialData(reportData.financialSummary);
+            return;
+        }
+
+        try {
+            // Fetch filtered report just to extract financials
+            let query = `?projectIds=${selectedProject.id}`;
+            if (fromDate && toDate) {
+                query += `&fromDate=${fromDate.toISOString().split('T')[0]}&toDate=${toDate.toISOString().split('T')[0]}`;
+            }
+
+            const response = await api.get(`/admin/overall-report${query}`);
+            setFinancialData(response.data.financialSummary);
+        } catch (error) {
+            console.error('Error fetching project financials:', error);
         }
     };
 
@@ -52,7 +148,7 @@ const OverallReportScreen = ({ navigation }: any) => {
     const handleDownloadPDF = async () => {
         if (!reportData) return;
         try {
-            const html = generateReportHTML(reportData);
+            const html = generateReportHTML(reportData, financialData);
             if (Platform.OS === 'web') {
                 // @ts-ignore - manual iframe printing for web to avoid printing full UI
                 const iframe = document.createElement('iframe');
@@ -100,11 +196,12 @@ const OverallReportScreen = ({ navigation }: any) => {
             csvContent += `Company Overview,Completed Projects,${reportData.companyOverview?.completed_projects || 0},\n`;
             csvContent += `Company Overview,Total Employees,${reportData.companyOverview?.total_employees || 0},\n`;
 
-            // Financials
-            csvContent += `Financials,Total Budget,${reportData.financialSummary?.total_allocated || 0},INR\n`;
-            csvContent += `Financials,Total Expenses,${reportData.financialSummary?.total_expenses || 0},INR\n`;
-            csvContent += `Financials,Balance,${reportData.financialSummary?.balance || 0},INR\n`;
-            csvContent += `Financials,Utilization,${reportData.financialSummary?.utilization_percentage || 0},%\n`;
+            // Financials (Use Filtered Data if available)
+            const financial = financialData || reportData.financialSummary;
+            csvContent += `Financials,Total Budget,${financial?.total_allocated || 0},INR\n`;
+            csvContent += `Financials,Total Expenses,${financial?.total_expenses || 0},INR\n`;
+            csvContent += `Financials,Balance,${financial?.balance || 0},INR\n`;
+            csvContent += `Financials,Utilization,${financial?.utilization_percentage || 0},%\n`;
 
             // Task Stats
             csvContent += `Tasks,Total Tasks,${reportData.taskStatistics?.total_tasks || 0},\n`;
@@ -153,7 +250,8 @@ const OverallReportScreen = ({ navigation }: any) => {
         </View>
     );
 
-    const generateReportHTML = (data: any) => {
+    const generateReportHTML = (data: any, finData: any) => {
+        const financial = finData || data.financialSummary;
         return `
             <html>
                 <head>
@@ -175,6 +273,8 @@ const OverallReportScreen = ({ navigation }: any) => {
                         .bg-green { background-color: #059669; }
                         .bg-red { background-color: #DC2626; }
                         .bg-yellow { background-color: #D97706; }
+                        .bg-blue { background-color: #0369A1; }
+                        .bg-gray { background-color: #374151; }
                     </style>
                 </head>
                 <body>
@@ -199,13 +299,58 @@ const OverallReportScreen = ({ navigation }: any) => {
                     </div>
 
                     <div class="section">
-                        <h2>Financial Overview</h2>
+                        <h2>Financial Overview ${selectedProject ? `(${selectedProject.name})` : ''}</h2>
                          <table>
                             <tr><th>Metric</th><th>Amount</th></tr>
-                            <tr><td>Total Allocated Budget</td><td>₹${Number(data.financialSummary?.total_allocated || 0).toLocaleString()}</td></tr>
-                            <tr><td>Total Received</td><td>₹${Number(data.financialSummary?.total_received || 0).toLocaleString()}</td></tr>
-                            <tr><td>Total Expenses</td><td>₹${Number(data.financialSummary?.total_expenses || 0).toLocaleString()}</td></tr>
-                             <tr><td><strong>Balance</strong></td><td class="${(data.financialSummary?.balance || 0) < 0 ? 'risk' : ''}"><strong>₹${Number(data.financialSummary?.balance || 0).toLocaleString()}</strong></td></tr>
+                            <tr><td>Total Allocated Budget</td><td>₹${Number(financial?.total_allocated || 0).toLocaleString()}</td></tr>
+                            <tr><td>Total Received</td><td>₹${Number(financial?.total_received || 0).toLocaleString()}</td></tr>
+                            <tr><td>Total Expenses</td><td>₹${Number(financial?.total_expenses || 0).toLocaleString()}</td></tr>
+                             <tr><td><strong>Balance</strong></td><td class="${(financial?.balance || 0) < 0 ? 'risk' : ''}"><strong>₹${Number(financial?.balance || 0).toLocaleString()}</strong></td></tr>
+                        </table>
+                    </div>
+
+                    <div class="section">
+                        <h2>Milestones Summary</h2>
+                        <div class="kpi-grid">
+                            <div class="kpi-card"><div class="kpi-val">${data.milestones?.stats?.total || 0}</div><div class="kpi-lbl">Total</div></div>
+                            <div class="kpi-card"><div class="kpi-val" style="color:#059669">${data.milestones?.stats?.completed || 0}</div><div class="kpi-lbl">Completed</div></div>
+                            <div class="kpi-card"><div class="kpi-val" style="color:#DC2626">${data.milestones?.stats?.delayed || 0}</div><div class="kpi-lbl">Delayed</div></div>
+                        </div>
+                        <table>
+                            <thead><tr><th>Milestone</th><th>Project</th><th>Status</th><th>Target/Achieved</th></tr></thead>
+                            <tbody>
+                                ${(data.milestones?.list || []).map((m: any) => {
+            const progress = m.progress || 0;
+            let dStatus = 'Not Started';
+
+            // TRUST DB STATUS Explicitly (Fix for user issue)
+            if (m.status && m.status.toLowerCase() === 'completed') {
+                dStatus = 'Completed';
+            } else {
+                if (progress === 100) dStatus = 'Completed';
+                else if (progress > 0) dStatus = 'Started';
+            }
+
+            const isDel = m.status === 'Delayed' || (dStatus !== 'Completed' && m.is_delayed);
+
+            // Date Formatting for PDF
+            const dateStr = dStatus === 'Completed' ? (m.actual_completion_date || m.derived_completion_date || m.updated_at) : m.planned_end_date;
+            const formattedDate = formatDateSafe(dateStr);
+
+            return `
+                                    <tr>
+                                        <td>${m.name}</td>
+                                        <td>${m.site_name}</td>
+                                        <td>
+                                            <span class="status-badge ${dStatus === 'Completed' ? 'bg-green' : isDel ? 'bg-red' : dStatus === 'Started' ? 'bg-blue' : 'bg-gray'}" style="${dStatus === 'Started' ? 'background-color:#E0F2FE;color:#0369A1' : isDel ? 'background-color:#FEE2E2;color:#991B1B' : ''}">
+                                                ${isDel ? 'DELAYED' : dStatus.toUpperCase()}
+                                            </span>
+                                        </td>
+                                        <td>${formattedDate}</td>
+                                    </tr>
+                                    `;
+        }).join('')}
+                            </tbody>
                         </table>
                     </div>
 
@@ -273,6 +418,7 @@ const OverallReportScreen = ({ navigation }: any) => {
                         <Ionicons name="close" size={16} color="#fff" />
                     </TouchableOpacity>
                 )}
+
             </View>
 
             <CustomDatePicker
@@ -291,6 +437,27 @@ const OverallReportScreen = ({ navigation }: any) => {
                 title="Select To Date"
             />
 
+            <Modal visible={showProjectPicker} transparent animationType="fade">
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                        <Text style={styles.modalTitle}>Filter by Project</Text>
+                        <ScrollView style={{ maxHeight: 300 }}>
+                            <TouchableOpacity onPress={() => { setSelectedProject(null); setShowProjectPicker(false); }}>
+                                <Text style={[styles.projectOption, !selectedProject && styles.selectedOption]}>All Projects</Text>
+                            </TouchableOpacity>
+                            {projects.map((p: any) => (
+                                <TouchableOpacity key={p.id} onPress={() => { setSelectedProject(p); setShowProjectPicker(false); }}>
+                                    <Text style={[styles.projectOption, selectedProject?.id === p.id && styles.selectedOption]}>{p.name}</Text>
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                        <TouchableOpacity onPress={() => setShowProjectPicker(false)} style={styles.closeButton}>
+                            <Text style={styles.closeButtonText}>Close</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
+
 
 
 
@@ -307,53 +474,166 @@ const OverallReportScreen = ({ navigation }: any) => {
                     <KpiCard label="Employees Active" value={reportData.companyOverview.active_employees_today} icon="people" color="#F59E0B" />
                 </ScrollView>
 
-                {/* 2. Financial Overview */}
-                <Text style={styles.sectionTitle}>Financial Overview</Text>
+                {/* 1.5. Milestones Summary (NEW) */}
+                <Text style={styles.sectionTitle}>Milestones Summary</Text>
                 <View style={styles.card}>
-                    <View style={styles.finRow}>
-                        <View style={styles.finItem}>
-                            <Text style={styles.finLabel}>Total Budget</Text>
-                            <Text style={styles.finValue}>₹{Number(reportData.financialSummary.total_allocated).toLocaleString()}</Text>
+                    {/* Stats Row */}
+                    <View style={styles.row}>
+                        <View style={{ alignItems: 'center' }}>
+                            <Text style={styles.statBig}>{reportData.milestones?.stats?.total || 0}</Text>
+                            <Text style={styles.statLabel}>Total</Text>
                         </View>
-                        <View style={styles.finItem}>
-                            <Text style={styles.finLabel}>Utilization</Text>
-                            <Text style={styles.finValue}>{reportData.financialSummary.utilization_percentage}%</Text>
+                        <View style={{ borderLeftWidth: 1, borderColor: '#eee', paddingLeft: 15, alignItems: 'center' }}>
+                            <Text style={[styles.statBig, { color: '#059669' }]}>{reportData.milestones?.stats?.completed || 0}</Text>
+                            <Text style={styles.statLabel}>Completed</Text>
                         </View>
-                    </View>
-                    <View style={{ marginVertical: 10, paddingHorizontal: 4 }}>
-                        <ProgressBar
-                            percentage={Number(reportData.financialSummary.utilization_percentage)}
-                            color={Number(reportData.financialSummary.utilization_percentage) > 100 ? '#EF4444' : Number(reportData.financialSummary.utilization_percentage) > 85 ? '#F59E0B' : '#10B981'}
-                        />
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 }}>
-                            <Text style={{ fontSize: 10, color: '#9CA3AF' }}>0%</Text>
-                            <Text style={{ fontSize: 10, color: '#9CA3AF' }}>100%</Text>
+                        <View style={{ borderLeftWidth: 1, borderColor: '#eee', paddingLeft: 15, alignItems: 'center' }}>
+                            <Text style={[styles.statBig, { color: '#DC2626' }]}>{reportData.milestones?.stats?.delayed || 0}</Text>
+                            <Text style={styles.statLabel}>Delayed</Text>
                         </View>
-                    </View>
-                    <View style={[styles.finRow, { marginTop: 15 }]}>
-                        <View style={styles.finItem}>
-                            <Text style={styles.finLabel}>Total Received</Text>
-                            <Text style={[styles.finValue, { color: '#059669' }]}>₹{Number(reportData.financialSummary.total_received).toLocaleString()}</Text>
-                        </View>
-                        <View style={styles.finItem}>
-                            <Text style={styles.finLabel}>Total Expenses</Text>
-                            <Text style={[styles.finValue, { color: '#DC2626' }]}>₹{Number(reportData.financialSummary.total_expenses).toLocaleString()}</Text>
+                        <View style={{ borderLeftWidth: 1, borderColor: '#eee', paddingLeft: 15, alignItems: 'center' }}>
+                            <Text style={[styles.statBig, { color: '#065F46', fontSize: 16, marginTop: 4 }]}>
+                                {formatDateSafe(reportData.milestones?.stats?.latest_achievement_date)}
+                            </Text>
+                            <Text style={styles.statLabel}>Last Achievement</Text>
                         </View>
                     </View>
-                    <View style={styles.divider} />
-                    <View style={styles.finRow}>
-                        <Text style={styles.balanceLabel}>Remaining Balance</Text>
-                        <Text style={[styles.balanceValue, { color: reportData.financialSummary.balance < 0 ? '#DC2626' : '#10B981' }]}>
-                            ₹{Number(reportData.financialSummary.balance).toLocaleString()}
-                        </Text>
-                    </View>
-                    {reportData.financialSummary.over_budget_projects_count > 0 && (
-                        <View style={styles.alertBox}>
-                            <MaterialIcons name="error-outline" size={20} color="#B91C1C" />
-                            <Text style={styles.alertText}>{reportData.financialSummary.over_budget_projects_count} Project(s) Over Budget</Text>
+
+                    {/* Milestone List Table */}
+                    <View style={{ marginTop: 20 }}>
+                        <View style={{ flexDirection: 'row', backgroundColor: '#F3F4F6', padding: 8, borderRadius: 6, marginBottom: 8 }}>
+                            <Text style={{ flex: 2, fontSize: 12, fontWeight: 'bold', color: '#374151' }}>Milestone</Text>
+                            <Text style={{ flex: 2, fontSize: 12, fontWeight: 'bold', color: '#374151' }}>Project</Text>
+                            <Text style={{ flex: 1.5, fontSize: 12, fontWeight: 'bold', color: '#374151' }}>Status</Text>
+                            <Text style={{ flex: 1.5, fontSize: 12, fontWeight: 'bold', color: '#374151', textAlign: 'right' }}>Target</Text>
                         </View>
-                    )}
+                        {reportData.milestones?.list && reportData.milestones.list.length > 0 ? (
+                            reportData.milestones.list.map((m: any, index: number) => {
+                                // Derive Status Logic (matching MilestoneList.tsx but safer)
+                                const progress = m.progress || 0;
+                                let derivedStatus = 'Not Started';
+
+                                // TRUST DB STATUS Explicitly
+                                if (m.status && m.status.toLowerCase() === 'completed') {
+                                    derivedStatus = 'Completed';
+                                } else {
+                                    if (progress === 100) derivedStatus = 'Completed';
+                                    else if (progress > 0) derivedStatus = 'Started';
+                                }
+
+                                // Delayed Logic
+                                const isDelayed = m.is_delayed; // Backend calculated or check date here
+                                // If status is Completed, it's never Delayed in UI (though backend might flag it)
+                                const displayDelayed = derivedStatus !== 'Completed' && isDelayed;
+
+                                let statusColor = '#1E40AF';
+                                let statusBg = '#DBEAFE';
+                                if (derivedStatus === 'Completed') { statusColor = '#065F46'; statusBg = '#D1FAE5'; }
+                                else if (derivedStatus === 'Started') { statusColor = '#0369A1'; statusBg = '#E0F2FE'; } // Distinct blue for Started
+                                else { statusColor = '#374151'; statusBg = '#F3F4F6'; } // Gray for Not Started
+
+                                if (displayDelayed) { statusColor = '#991B1B'; statusBg = '#FEE2E2'; }
+
+                                return (
+                                    <View key={index} style={{ flexDirection: 'row', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' }}>
+                                        <Text style={{ flex: 2, fontSize: 12, color: '#1F2937' }} numberOfLines={1}>{m.name}</Text>
+                                        <Text style={{ flex: 2, fontSize: 12, color: '#6B7280' }} numberOfLines={1}>{m.site_name}</Text>
+                                        <View style={{ flex: 1.5 }}>
+                                            <View style={{
+                                                backgroundColor: statusBg,
+                                                paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, alignSelf: 'flex-start'
+                                            }}>
+                                                <Text style={{
+                                                    fontSize: 10, fontWeight: 'bold',
+                                                    color: statusColor
+                                                }}>
+                                                    {displayDelayed ? 'DELAYED' : derivedStatus.toUpperCase()}
+                                                </Text>
+                                            </View>
+                                        </View>
+                                        <Text style={{ flex: 1.5, fontSize: 11, color: '#374151', textAlign: 'right' }}>
+                                            {derivedStatus === 'Completed'
+                                                ? `Achieved: ${formatDateSafe(m.actual_completion_date || m.derived_completion_date || m.updated_at)}`
+                                                : `Target: ${formatDateSafe(m.planned_end_date)}`
+                                            }
+                                        </Text>
+                                    </View>
+                                );
+                            })
+                        ) : (
+                            <Text style={{ textAlign: 'center', color: '#9CA3AF', marginTop: 10, fontSize: 12 }}>No Data Available</Text>
+                        )}
+                    </View>
                 </View>
+
+                {/* 2. Financial Overview */}
+                <View style={[styles.sectionHeader, { justifyContent: 'space-between', alignItems: 'center' }]}>
+                    <Text style={styles.sectionTitle}>Financial Overview</Text>
+
+                    <TouchableOpacity onPress={() => setShowProjectPicker(true)} style={[styles.dateBtn, selectedProject && { backgroundColor: '#EFF6FF', borderColor: '#3B82F6', paddingVertical: 4, paddingHorizontal: 8 }]}>
+                        <Ionicons name="filter" size={14} color={selectedProject ? '#2563EB' : '#666'} />
+                        <Text style={[styles.dateText, { fontSize: 11 }, selectedProject && { color: '#1E40AF', fontWeight: 'bold' }]}>
+                            {selectedProject ? (selectedProject.name.length > 15 ? selectedProject.name.slice(0, 15) + '...' : selectedProject.name) : 'Filter Project'}
+                        </Text>
+                        {selectedProject && (
+                            <TouchableOpacity onPress={() => setSelectedProject(null)} style={{ marginLeft: 6 }}>
+                                <Ionicons name="close-circle" size={14} color="#2563EB" />
+                            </TouchableOpacity>
+                        )}
+                    </TouchableOpacity>
+                </View>
+
+                {financialData ? (
+                    <View style={styles.card}>
+                        <View style={styles.finRow}>
+                            <View style={styles.finItem}>
+                                <Text style={styles.finLabel}>Total Budget</Text>
+                                <Text style={styles.finValue}>₹{Number(financialData.total_allocated).toLocaleString()}</Text>
+                            </View>
+                            <View style={styles.finItem}>
+                                <Text style={styles.finLabel}>Utilization</Text>
+                                <Text style={styles.finValue}>{financialData.utilization_percentage}%</Text>
+                            </View>
+                        </View>
+                        <View style={{ marginVertical: 10, paddingHorizontal: 4 }}>
+                            <ProgressBar
+                                percentage={Number(financialData.utilization_percentage)}
+                                color={Number(financialData.utilization_percentage) > 100 ? '#EF4444' : Number(financialData.utilization_percentage) > 85 ? '#F59E0B' : '#10B981'}
+                            />
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 }}>
+                                <Text style={{ fontSize: 10, color: '#9CA3AF' }}>0%</Text>
+                                <Text style={{ fontSize: 10, color: '#9CA3AF' }}>100%</Text>
+                            </View>
+                        </View>
+                        <View style={[styles.finRow, { marginTop: 15 }]}>
+                            <View style={styles.finItem}>
+                                <Text style={styles.finLabel}>Total Received</Text>
+                                <Text style={[styles.finValue, { color: '#059669' }]}>₹{Number(financialData.total_received).toLocaleString()}</Text>
+                            </View>
+                            <View style={styles.finItem}>
+                                <Text style={styles.finLabel}>Total Expenses</Text>
+                                <Text style={[styles.finValue, { color: '#DC2626' }]}>₹{Number(financialData.total_expenses).toLocaleString()}</Text>
+                            </View>
+                        </View>
+                        <View style={styles.divider} />
+                        <View style={styles.finRow}>
+                            <Text style={styles.balanceLabel}>Remaining Balance</Text>
+                            <Text style={[styles.balanceValue, { color: financialData.balance < 0 ? '#DC2626' : '#10B981' }]}>
+                                ₹{Number(financialData.balance).toLocaleString()}
+                            </Text>
+                        </View>
+                        {financialData.over_budget_projects_count > 0 && !selectedProject && (
+                            <View style={styles.alertBox}>
+                                <MaterialIcons name="error-outline" size={20} color="#B91C1C" />
+                                <Text style={styles.alertText}>{financialData.over_budget_projects_count} Project(s) Over Budget</Text>
+                            </View>
+                        )}
+                    </View>
+                ) : (
+                    <View style={[styles.card, { padding: 20, alignItems: 'center' }]}>
+                        <ActivityIndicator size="small" color="#8B0000" />
+                    </View>
+                )}
 
                 {/* 3. Project-Wise Detailed Status */}
                 <Text style={styles.sectionTitle}>{fromDate && toDate ? "Project Activity (Selected Period)" : "Project Status"}</Text>
@@ -652,7 +932,16 @@ const styles = StyleSheet.create({
     filterRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 12, gap: 10 },
     dateBtn: { flexDirection: 'row', backgroundColor: '#fff', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, alignItems: 'center', gap: 6, borderWidth: 1, borderColor: '#E5E7EB' },
     dateText: { fontSize: 13, color: '#374151' },
-    clearBtn: { backgroundColor: '#9CA3AF', padding: 4, borderRadius: 10 }
+    clearBtn: { backgroundColor: '#9CA3AF', padding: 4, borderRadius: 10 },
+
+    // Modal Styles
+    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+    modalContent: { width: '85%', maxHeight: '60%', backgroundColor: '#fff', borderRadius: 12, padding: 20, elevation: 5 },
+    modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#111827', marginBottom: 15, textAlign: 'center' },
+    projectOption: { paddingVertical: 12, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: '#F3F4F6', fontSize: 16, color: '#374151' },
+    selectedOption: { color: '#2563EB', fontWeight: 'bold', backgroundColor: '#EFF6FF' },
+    closeButton: { marginTop: 15, backgroundColor: '#8B0000', padding: 12, borderRadius: 8, alignItems: 'center' },
+    closeButtonText: { color: '#fff', fontWeight: 'bold' }
 });
 
 export default OverallReportScreen;

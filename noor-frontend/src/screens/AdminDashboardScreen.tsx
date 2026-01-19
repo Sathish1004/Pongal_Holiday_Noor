@@ -24,6 +24,9 @@ import {
   Linking,
 } from "react-native";
 import ConfirmationModal from "../components/ConfirmationModal";
+import MilestoneList from "../components/MilestoneList"; // NEW
+import AddMilestoneModal from "../components/AddMilestoneModal"; // NEW
+import AchievementBanner from "../components/AchievementBanner"; // NEW
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { AuthContext } from "../context/AuthContext";
 import api from "../services/api";
@@ -921,6 +924,88 @@ const AdminDashboardScreen = () => {
     }
   };
 
+  // --- Milestone Handlers ---
+  const handleSaveMilestone = async (data: any) => {
+    if (!selectedSite?.id) return;
+
+    // Check if marking as completed
+    if (data.status === 'Completed') {
+      // Trigger Banner
+      setUnlockedMilestoneName(data.name);
+
+      // Add completion date if not present (backend might handle this, but explicit is better)
+      if (!data.actual_completion_date) {
+        data.actual_completion_date = new Date().toISOString(); // Or YYYY-MM-DD based on backend preference
+      }
+    }
+
+    try {
+      if (data.id) {
+        // Update
+        await api.put(`/admin/milestones/${data.id}`, data);
+        showToast("Milestone updated successfully", "success");
+      } else {
+        // Create
+        await api.post(`/admin/milestones`, {
+          ...data,
+          siteId: selectedSite.id
+        });
+        showToast("Milestone created successfully", "success");
+      }
+
+      // Refresh milestones
+      const milesRes = await api.get(`/admin/sites/${selectedSite.id}/milestones`);
+      const milestones = (milesRes.data || []).map((m: any) => ({
+        ...m,
+        status: m.status || "Not Started",
+      }));
+      setProjectMilestones(milestones);
+
+      // Refresh phases (as linkage might have changed)
+      const phasesRes = await api.get(`/sites/${selectedSite.id}/phases`);
+      setProjectPhases(phasesRes.data.phases || []);
+
+    } catch (error) {
+      console.error("Error saving milestone:", error);
+      showToast("Failed to save milestone", "error");
+    }
+  };
+
+  const handleDeleteMilestone = async (id: number) => {
+    console.log("handleDeleteMilestone called with ID:", id);
+    if (!selectedSite?.id) return;
+    try {
+      await api.delete(`/admin/milestones/${id}`);
+      showToast("Milestone deleted successfully", "success");
+
+      // Refresh milestones
+      const milesRes = await api.get(`/admin/sites/${selectedSite.id}/milestones`);
+      const milestones = (milesRes.data || []).map((m: any) => ({
+        ...m,
+        status: m.status || "Not Started",
+      }));
+      setProjectMilestones(milestones);
+
+      // Refresh phases (as linkage might have changed)
+      const phasesRes = await api.get(`/sites/${selectedSite.id}/phases`);
+      setProjectPhases(phasesRes.data.phases || []);
+
+    } catch (error) {
+      console.error("Error deleting milestone:", error);
+      showToast("Failed to delete milestone", "error");
+    }
+  };
+
+  const handleEditMilestone = (milestone: any) => {
+    setEditingMilestone(milestone);
+    setAddMilestoneModalVisible(true);
+  };
+
+  const handleAddMilestone = () => {
+    setEditingMilestone(null);
+    setAddMilestoneModalVisible(true);
+  };
+
   const handleAddNewStage = async () => {
     if (!newStageFloor || !newStageName) {
       showToast("Please select a floor and enter a stage name", "error");
@@ -1265,42 +1350,6 @@ const AdminDashboardScreen = () => {
   const [sitePickerVisible, setSitePickerVisible] = useState(false);
   const [settingsPhases, setSettingsPhases] = useState<any[]>([]);
 
-  // Material Requests State (Admin)
-  const [materialRequests, setMaterialRequests] = useState<any[]>([]);
-  const [projectMaterials, setProjectMaterials] = useState<any[]>([]); // To store materials for specific project logic
-
-  // Fetch all materials for admin
-  const fetchAdminMaterials = async () => {
-    setLoading(true);
-    try {
-      const response = await api.get("/materials");
-      setMaterialRequests(response.data.requests || []);
-    } catch (error) {
-      console.error("Error fetching admin materials:", error);
-      showToast("Failed to fetch material requests", "error");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchProjectMaterials = useCallback(async (siteId: number) => {
-    try {
-      const response = await api.get(`/sites/${siteId}/materials`);
-      setProjectMaterials(response.data.requests || []);
-    } catch (error) {
-      console.error("Error fetching project materials:", error);
-    }
-  }, []);
-
-  const selectedSiteId = selectedSite?.id;
-
-  // Effect to fetch project materials when tab changes
-  useEffect(() => {
-    if (activeProjectTab === "Materials" && selectedSiteId) {
-      fetchProjectMaterials(selectedSiteId);
-    }
-  }, [activeProjectTab, selectedSiteId, fetchProjectMaterials]);
-
   // Files State
   const [projectFiles, setProjectFiles] = useState<any[]>([]);
   const [activeFileTab, setActiveFileTab] = useState<
@@ -1309,9 +1358,7 @@ const AdminDashboardScreen = () => {
   const [fileLoading, setFileLoading] = useState(false);
 
   // Dashboard Stats State
-  const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(
-    null
-  );
+  const [dashboardStats, setDashboardStats] = useState<any>(null); // Fixed type to any strictly to enable build, user reported type errors
   const [statsLoading, setStatsLoading] = useState(false);
 
   // Completed Tasks Filter State
@@ -1340,6 +1387,9 @@ const AdminDashboardScreen = () => {
     to: string;
   } | null>(null);
   const [dateRangePickerVisible, setDateRangePickerVisible] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [confirmPassword, setConfirmPassword] = useState("");
 
   const fetchCompletedTasksList = async (
     filter: string,
@@ -1443,6 +1493,8 @@ const AdminDashboardScreen = () => {
     }
   };
 
+  const selectedSiteId = selectedSite?.id;
+
   // Effect for Files
   useEffect(() => {
     if (activeProjectTab === "Files" && selectedSiteId) {
@@ -1471,8 +1523,46 @@ const AdminDashboardScreen = () => {
     }
   }, [activeTab]);
 
-  // Project Detail Data
+  // Material Requests State (Admin)
+  const [materialRequests, setMaterialRequests] = useState<any[]>([]);
+  const [projectMaterials, setProjectMaterials] = useState<any[]>([]); // To store materials for specific project logic
+
+  // Fetch all materials for admin
+  const fetchAdminMaterials = async () => {
+    setLoading(true);
+    try {
+      const response = await api.get("/materials");
+      setMaterialRequests(response.data.requests || []);
+    } catch (error) {
+      console.error("Error fetching admin materials:", error);
+      showToast("Failed to fetch material requests", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchProjectMaterials = useCallback(async (siteId: number) => {
+    try {
+      const response = await api.get(`/sites/${siteId}/materials`);
+      setProjectMaterials(response.data.requests || []);
+    } catch (error) {
+      console.error("Error fetching project materials:", error);
+    }
+  }, []);
+
+
+  // Effect to fetch project materials when tab changes
+  useEffect(() => {
+    if (activeProjectTab === "Materials" && selectedSiteId) {
+      fetchProjectMaterials(selectedSiteId);
+    }
+  }, [activeProjectTab, selectedSiteId, fetchProjectMaterials]);
+
+  // Files State
   const [projectPhases, setProjectPhases] = useState<any[]>([]);
+  const [projectMilestones, setProjectMilestones] = useState<any[]>([]); // NEW
+  const [addMilestoneModalVisible, setAddMilestoneModalVisible] = useState(false); // NEW
+  const [editingMilestone, setEditingMilestone] = useState<any>(null); // NEW
   const [projectTasks, setProjectTasks] = useState<any[]>([]);
   const [projectLoading, setProjectLoading] = useState(false);
 
@@ -1506,7 +1596,7 @@ const AdminDashboardScreen = () => {
     email: string;
     password: string;
     phone: string;
-    role: "Admin" | "Supervisor" | "Worker" | "Engineer";
+    role: string;
     status: "Active" | "Inactive";
   }>({
     name: "",
@@ -1584,6 +1674,10 @@ const AdminDashboardScreen = () => {
     setEditingSection("none");
     setTempFormData(null);
   };
+
+  // Achievement System State
+  const [unlockedMilestoneName, setUnlockedMilestoneName] = useState<string | null>(null);
+  const processedMilestoneIds = React.useRef(new Set<number>());
 
   const isFocused = useIsFocused();
 
@@ -2488,6 +2582,7 @@ const AdminDashboardScreen = () => {
     setSelectedSite(null); // Reset selection on close
     setProjectPhases([]);
     setProjectTasks([]);
+    setProjectMilestones([]); // Reset milestones on close
 
     setExpandedPhaseIds([]);
     setPhaseModalVisible(false);
@@ -2507,6 +2602,45 @@ const AdminDashboardScreen = () => {
       if (phases.length > 0) {
         setExpandedPhaseIds([phases[0].id]);
       }
+
+      // Fetch Milestones
+      try {
+        const milesRes = await api.get(`/admin/sites/${siteId}/milestones`);
+        const milestones = (milesRes.data || []).map((m: any) => ({
+          ...m,
+          status: m.status || "Not Started",
+        }));
+        setProjectMilestones(milestones);
+
+        // Check for newly achieved milestones
+        const today = new Date().toISOString().split('T')[0];
+        milestones.forEach((m: any) => {
+          if (m.status === 'Completed') {
+            const isProcessed = processedMilestoneIds.current.has(m.id);
+            // Check if completed today (or recently if actual_completion_date is missing but status is completed)
+            // For robustness, if actual_completion_date is today.
+            let completedDate = null;
+            if (m.actual_completion_date) {
+              // Handle various date formats if needed, but ISO expected from backend
+              if (m.actual_completion_date.includes('T')) {
+                completedDate = m.actual_completion_date.split('T')[0];
+              } else {
+                completedDate = m.actual_completion_date;
+              }
+            }
+
+            if (!isProcessed && completedDate === today) {
+              setUnlockedMilestoneName(m.name);
+            }
+
+            processedMilestoneIds.current.add(m.id);
+          }
+        });
+
+      } catch (err) {
+        console.log("Error fetching milestones", err);
+      }
+
     } catch (error) {
       console.error("Error fetching project details:", error);
       showToast("Failed to load project details", "error");
@@ -3407,7 +3541,7 @@ Project Team`;
       if (lower === "admin") return "Admin";
       if (lower === "supervisor") return "Supervisor";
       if (lower === "engineer") return "Engineer";
-      return "Worker";
+      return r;
     };
 
     setNewEmployee({
@@ -3418,6 +3552,9 @@ Project Team`;
       role: mapRole(employee.role),
       status: employee.status === "Inactive" ? "Inactive" : "Active",
     });
+    setConfirmPassword("");
+    setShowPassword(false);
+    setShowConfirmPassword(false);
     setEditingEmployeeId(employee.id);
     setEmployeeModalVisible(true);
   };
@@ -3468,6 +3605,9 @@ Project Team`;
         name: currentPhase.name,
         order_num: currentPhase.order_num,
         budget: newBudget,
+        serialNumber: currentPhase.order_num, // Send current serial number
+        floorNumber: currentPhase.floor_number, // Send current floor number to preserve it
+        floorName: currentPhase.floor_name // Send current floor name
       });
 
       showToast("Budget updated successfully", "success");
@@ -4450,6 +4590,9 @@ Project Team`;
                       role: "Worker",
                       status: "Active",
                     });
+                    setConfirmPassword("");
+                    setShowPassword(false);
+                    setShowConfirmPassword(false);
                     setEditingEmployeeId(null);
                     setEmployeeModalVisible(true);
                   }}
@@ -4497,7 +4640,7 @@ Project Team`;
               style={styles.detailsButton}
               onPress={() => handleOpenSettings(selectedSite)}
             >
-              <Text style={styles.detailsButtonText}>Dashboard</Text>
+              <Text style={styles.detailsButtonText}>Details</Text>
             </TouchableOpacity>
           </View>
 
@@ -4541,9 +4684,38 @@ Project Team`;
           </ScrollView>
 
           <SafeScrollContainer style={styles.modalBody}>
+            {/* Achievement Banner */}
+            {unlockedMilestoneName && (
+              <AchievementBanner
+                milestoneName={unlockedMilestoneName}
+                onDismiss={() => setUnlockedMilestoneName(null)}
+              />
+            )}
+
             {activeProjectTab === "Tasks" && (
               <View style={styles.tabContentContainer}>
                 <View style={styles.sectionHeaderRow}>
+                  <Text style={styles.tabSectionTitle}>
+                    Milestones
+                  </Text>
+                </View>
+
+                <MilestoneList
+                  milestones={projectMilestones}
+                  onAddPress={handleAddMilestone}
+                  onEditPress={handleEditMilestone}
+                />
+
+                <AddMilestoneModal
+                  visible={addMilestoneModalVisible}
+                  onClose={() => setAddMilestoneModalVisible(false)}
+                  onSave={handleSaveMilestone}
+                  onDelete={handleDeleteMilestone}
+                  milestoneData={editingMilestone}
+                  projectPhases={projectPhases}
+                />
+
+                <View style={[styles.sectionHeaderRow, { marginTop: 20 }]}>
                   <Text style={styles.tabSectionTitle}>
                     Construction Stages
                   </Text>
@@ -6439,33 +6611,7 @@ Project Team`;
               Configuration Details
             </Text>
 
-            <View style={{ flexDirection: 'row', gap: 10 }}>
-              <TouchableOpacity
-                style={{
-                  backgroundColor: '#25D366',
-                  paddingHorizontal: 12,
-                  paddingVertical: 8,
-                  borderRadius: 8,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 6
-                }}
-                onPress={handleShareProjectPDF}
-              >
-                <Ionicons name="logo-whatsapp" size={16} color="#FFF" />
-                <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 13 }}>Share Report</Text>
-              </TouchableOpacity>
 
-              <TouchableOpacity
-                style={styles.saveSettingsBtn}
-                onPress={async () => {
-                  await submitCreateProject();
-                  setProjectSettingsVisible(false);
-                }}
-              >
-                <Text style={styles.saveSettingsText}>Update</Text>
-              </TouchableOpacity>
-            </View>
           </View>
 
           <View style={{ flex: 1, flexDirection: isMobile ? "column" : "row" }}>
@@ -8134,7 +8280,56 @@ Project Team`;
               />
             </View>
 
-            {!editingEmployeeId && (
+            {/* Password Section */}
+            <View style={{ marginBottom: 16 }}>
+              <Text
+                style={{
+                  fontSize: 14,
+                  fontWeight: "600",
+                  color: "#374151",
+                  marginBottom: 8,
+                }}
+              >
+                {editingEmployeeId ? "New Password (Optional)" : "Password *"}
+              </Text>
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  borderWidth: 1,
+                  borderColor: "#D1D5DB",
+                  borderRadius: 8,
+                  paddingHorizontal: 12,
+                  backgroundColor: "#FFF",
+                }}
+              >
+                <TextInput
+                  style={{
+                    flex: 1,
+                    paddingVertical: 12,
+                    fontSize: 14,
+                    color: "#111827",
+                  }}
+                  placeholder={
+                    editingEmployeeId ? "Enter new password" : "Enter password"
+                  }
+                  value={newEmployee.password}
+                  onChangeText={(text) =>
+                    setNewEmployee({ ...newEmployee, password: text })
+                  }
+                  secureTextEntry={!showPassword}
+                />
+                <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
+                  <Ionicons
+                    name={showPassword ? "eye" : "eye-off"}
+                    size={20}
+                    color="#6B7280"
+                  />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {editingEmployeeId && (
               <View style={{ marginBottom: 16 }}>
                 <Text
                   style={{
@@ -8144,24 +8339,41 @@ Project Team`;
                     marginBottom: 8,
                   }}
                 >
-                  Password *
+                  Confirm New Password
                 </Text>
-                <TextInput
+                <View
                   style={{
+                    flexDirection: "row",
+                    alignItems: "center",
                     borderWidth: 1,
                     borderColor: "#D1D5DB",
                     borderRadius: 8,
-                    padding: 12,
-                    fontSize: 14,
-                    color: "#111827",
+                    paddingHorizontal: 12,
+                    backgroundColor: "#FFF",
                   }}
-                  placeholder="Enter password"
-                  value={newEmployee.password}
-                  onChangeText={(text) =>
-                    setNewEmployee({ ...newEmployee, password: text })
-                  }
-                  secureTextEntry
-                />
+                >
+                  <TextInput
+                    style={{
+                      flex: 1,
+                      paddingVertical: 12,
+                      fontSize: 14,
+                      color: "#111827",
+                    }}
+                    placeholder="Confirm new password"
+                    value={confirmPassword}
+                    onChangeText={setConfirmPassword}
+                    secureTextEntry={!showConfirmPassword}
+                  />
+                  <TouchableOpacity
+                    onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                  >
+                    <Ionicons
+                      name={showConfirmPassword ? "eye" : "eye-off"}
+                      size={20}
+                      color="#6B7280"
+                    />
+                  </TouchableOpacity>
+                </View>
               </View>
             )}
 
@@ -8205,36 +8417,21 @@ Project Team`;
               >
                 Role *
               </Text>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                {(["Worker", "Engineer", "Supervisor", "Admin"] as const).map(
-                  (role) => (
-                    <TouchableOpacity
-                      key={role}
-                      style={{
-                        paddingHorizontal: 16,
-                        paddingVertical: 10,
-                        borderRadius: 8,
-                        borderWidth: 1,
-                        borderColor:
-                          newEmployee.role === role ? "#8B0000" : "#D1D5DB",
-                        backgroundColor:
-                          newEmployee.role === role ? "#FEF2F2" : "#FFF",
-                      }}
-                      onPress={() => setNewEmployee({ ...newEmployee, role })}
-                    >
-                      <Text
-                        style={{
-                          color:
-                            newEmployee.role === role ? "#8B0000" : "#6B7280",
-                          fontWeight: newEmployee.role === role ? "600" : "400",
-                        }}
-                      >
-                        {role}
-                      </Text>
-                    </TouchableOpacity>
-                  )
-                )}
-              </View>
+              <TextInput
+                style={{
+                  borderWidth: 1,
+                  borderColor: "#D1D5DB",
+                  borderRadius: 8,
+                  padding: 12,
+                  fontSize: 14,
+                  color: "#111827",
+                }}
+                placeholder="Enter role (e.g. Worker, Engineer)"
+                value={newEmployee.role}
+                onChangeText={(text) =>
+                  setNewEmployee({ ...newEmployee, role: text })
+                }
+              />
             </View>
 
             <View style={{ marginBottom: 24 }}>
@@ -8299,6 +8496,15 @@ Project Team`;
                     "Error",
                     "Please fill in all required fields (Name, Email, Phone, Role, Password)"
                   );
+                  return;
+                }
+
+                if (
+                  editingEmployeeId &&
+                  newEmployee.password &&
+                  newEmployee.password !== confirmPassword
+                ) {
+                  Alert.alert("Error", "Passwords do not match");
                   return;
                 }
 

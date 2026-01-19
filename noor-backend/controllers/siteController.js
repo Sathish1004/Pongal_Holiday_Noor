@@ -2,6 +2,8 @@
 const db = require('../config/db');
 const bcrypt = require('bcrypt'); // Added for password hashing
 
+const { checkAndCompleteMilestones } = require('../utils/milestoneHelper');
+
 // Helper to Create Notification
 const createNotification = async (projectId, phaseId, taskId, employeeId, type, message) => {
     try {
@@ -284,32 +286,14 @@ exports.addPhase = async (req, res) => {
 exports.updatePhase = async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, order_num, budget, serialNumber, floorNumber, floorName } = req.body;
+        const { name, order_num, budget } = req.body;
 
-        const sNumber = parseInt(serialNumber);
-        const fNumber = parseInt(floorNumber);
-        const fName = floorName || "Ground Floor";
-
-        // Validate Serial Number if provided
-        if (sNumber) {
-            // Get site_id for this phase
-            const [phase] = await db.query('SELECT site_id FROM phases WHERE id = ?', [id]);
-            if (phase.length > 0) {
-                const siteId = phase[0].site_id;
-                // Check if another phase has this serial number
-                const [existing] = await db.query(
-                    'SELECT id FROM phases WHERE site_id = ? AND serial_number = ? AND id != ?',
-                    [siteId, sNumber, id]
-                );
-                if (existing.length > 0) {
-                    return res.status(400).json({ message: 'Serial Number already exists for this project' });
-                }
-            }
-        }
+        // Note: serialNumber, floorNumber, floorName are not currently in the schema
+        // and support for them was partial. We are sticking to the core columns.
 
         await db.query(
-            'UPDATE phases SET name = ?, order_num = ?, budget = ?, serial_number = ?, floor_number = ?, floor_name = ? WHERE id = ?',
-            [name, order_num, budget || 0, sNumber, fNumber, fName, id]
+            'UPDATE phases SET name = ?, order_num = ?, budget = ? WHERE id = ?',
+            [name, order_num, budget || 0, id]
         );
 
         res.json({ message: 'Phase updated successfully' });
@@ -477,6 +461,9 @@ exports.addTask = async (req, res) => {
     }
 };
 
+
+// ... (existing code)
+
 // Update task (Admin can rename/assign, Employee updates status)
 exports.updateTask = async (req, res) => {
     try {
@@ -545,9 +532,10 @@ exports.updateTask = async (req, res) => {
         }
 
         // CHECK FOR PHASE COMPLETION (Logic replicated from taskController)
-        const [taskData] = await db.query('SELECT phase_id FROM tasks WHERE id = ?', [id]);
+        const [taskData] = await db.query('SELECT phase_id, site_id FROM tasks WHERE id = ?', [id]);
         if (taskData.length > 0 && taskData[0].phase_id) {
             const phaseId = taskData[0].phase_id;
+            const siteId = taskData[0].site_id;
             const [incompleteTasks] = await db.query(
                 'SELECT id FROM tasks WHERE phase_id = ? AND status != "completed"',
                 [phaseId]
@@ -577,6 +565,10 @@ exports.updateTask = async (req, res) => {
                     );
                 }
             }
+
+            // CHECK FOR MILESTONE COMPLETION
+            // We check this after any task update that might have completed the phase/task
+            await checkAndCompleteMilestones(siteId);
         }
 
         res.json({ message: 'Task updated successfully' });
@@ -770,7 +762,7 @@ exports.createEmployee = async (req, res) => {
 
         // Insert
         await db.query(
-            'INSERT INTO employees (name, email, phone, password, role, status) VALUES (?, ?, ?, ?, ?, ?)',
+            'INSERT INTO employees (name, email, phone, password, role, status, password_updated_at) VALUES (?, ?, ?, ?, ?, ?, NOW())',
             [name, email || null, phone, hashedPassword, role.toLowerCase(), status || 'Active']
         );
 
@@ -812,7 +804,7 @@ exports.updateEmployee = async (req, res) => {
 
         if (password && password.trim() !== '') {
             const hashedPassword = await bcrypt.hash(password, 10);
-            query += ', password = ?';
+            query += ', password = ?, password_updated_at = NOW()';
             params.push(hashedPassword);
         }
 
