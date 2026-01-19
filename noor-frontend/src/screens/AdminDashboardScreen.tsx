@@ -968,6 +968,7 @@ const AdminDashboardScreen = () => {
     } catch (error) {
       console.error("Error saving milestone:", error);
       showToast("Failed to save milestone", "error");
+      throw error;
     }
   };
 
@@ -3264,6 +3265,12 @@ const AdminDashboardScreen = () => {
   const handleDownloadPDF = async () => {
     try {
       const html = generateReportHTML();
+
+      if (Platform.OS === "web") {
+        await Print.printAsync({ html });
+        return;
+      }
+
       const { uri } = await Print.printToFileAsync({ html, base64: false });
       await Sharing.shareAsync(uri, {
         UTI: ".pdf",
@@ -4756,15 +4763,13 @@ Project Team`;
                       return (
                         <View key={floorName} style={{ marginBottom: 24 }}>
                           <View style={{
-                            paddingVertical: 8,
-                            paddingHorizontal: 12,
-                            backgroundColor: '#F3F4F6',
+                            paddingVertical: 10,
+                            paddingHorizontal: 16,
+                            backgroundColor: '#054fa3ff', // Dark Blue
                             borderRadius: 8,
                             marginBottom: 12,
-                            borderLeftWidth: 4,
-                            borderLeftColor: '#8B0000'
                           }}>
-                            <Text style={{ fontSize: 13, fontWeight: '800', color: '#374151', textTransform: 'uppercase' }}>
+                            <Text style={{ fontSize: 13, fontWeight: '800', color: '#FFFFFF', textTransform: 'uppercase' }}>
                               {floorName}
                             </Text>
                           </View>
@@ -10319,7 +10324,7 @@ const styles = StyleSheet.create({
   addStageBtnText: {
     fontSize: 12,
     fontWeight: "600",
-    color: "#8B0000",
+    color: "#3B82F6",
     marginLeft: 4,
   },
   // Mini Modal Styles (for Add Phase)
@@ -10380,7 +10385,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#F3F4F6",
   },
   miniModalSaveBtn: {
-    backgroundColor: "#8B0000",
+    backgroundColor: "#3B82F6",
   },
   miniModalCancelText: {
     fontSize: 14,
@@ -10393,7 +10398,7 @@ const styles = StyleSheet.create({
     color: "#fff",
   },
   miniModalButton: {
-    backgroundColor: "#8B0000",
+    backgroundColor: "#3B82F6",
     borderRadius: 8,
     paddingVertical: 12,
     alignItems: "center",
@@ -10507,7 +10512,7 @@ const styles = StyleSheet.create({
   },
   submitButton: {
     flex: 1,
-    backgroundColor: "#8B0000",
+    backgroundColor: "#3B82F6",
     borderRadius: 8,
     paddingVertical: 14,
     alignItems: "center",
@@ -10603,7 +10608,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#f3f4f6",
   },
   topNavItemActive: {
-    backgroundColor: "#8B0000",
+    backgroundColor: "#3B82F6",
   },
   topNavText: {
     fontSize: 14,
@@ -10628,7 +10633,7 @@ const styles = StyleSheet.create({
     borderBottomColor: "transparent",
   },
   modalTabActive: {
-    borderBottomColor: "#8B0000",
+    borderBottomColor: "#3B82F6",
   },
   modalTabText: {
     fontSize: 14,
@@ -10636,7 +10641,7 @@ const styles = StyleSheet.create({
     color: "#6b7280",
   },
   modalTabTextActive: {
-    color: "#8B0000",
+    color: "#3B82F6",
   },
   modalBody: {
     flex: 1,
@@ -10655,7 +10660,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     padding: 16,
-    backgroundColor: "#8B0000", // Dark Red
+    backgroundColor: "#F0F9FF", // Light Blue
+    borderBottomWidth: 1,
+    borderBottomColor: "#BAE6FD",
   },
   phaseHeaderCollapsed: {
     // Keep standard border radius
@@ -10664,24 +10671,24 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: "#fff",
+    backgroundColor: "#38BDF8",
     alignItems: "center",
     justifyContent: "center",
   },
   phaseBadgeText: {
     fontSize: 14,
     fontWeight: "700",
-    color: "#8B0000",
+    color: "#fff",
   },
   phaseTitle: {
     fontSize: 16,
     fontWeight: "700",
-    color: "#fff",
+    color: "#0369A1",
     marginBottom: 2,
   },
   phaseSubtitle: {
     fontSize: 11,
-    color: "rgba(255,255,255,0.8)",
+    color: "#64748B",
     fontWeight: "500",
   },
 
@@ -10690,7 +10697,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   taskItem: {
-    backgroundColor: "#fff",
+    backgroundColor: "#F8FAFC",
     borderBottomWidth: 1,
     borderBottomColor: "#f3f4f6",
     paddingVertical: 12,
@@ -10725,7 +10732,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#059669",
   },
   taskActionButton: {
-    backgroundColor: "#8B0000",
+    backgroundColor: "#3B82F6",
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 6,

@@ -157,7 +157,7 @@ const styles = StyleSheet.create({
     tagline: {
         fontSize: 14,
         fontWeight: '700',
-        color: '#8B0000',
+        color: '#3B82F6',
         textTransform: 'uppercase',
         letterSpacing: 3,
         textAlign: 'center',
@@ -197,7 +197,7 @@ const styles = StyleSheet.create({
     },
     progressBarFill: {
         height: '100%',
-        backgroundColor: '#8B0000',
+        backgroundColor: '#3B82F6',
         borderRadius: 2,
     },
     loadingText: {

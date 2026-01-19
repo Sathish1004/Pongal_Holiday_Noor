@@ -148,7 +148,7 @@ const AddMilestoneModal: React.FC<AddMilestoneModalProps> = ({
                                             {phase.name}
                                         </Text>
                                         {selectedPhaseIds.includes(phase.id) && (
-                                            <Ionicons name="checkmark-circle" size={16} color="#059669" />
+                                            <Ionicons name="checkmark-circle" size={16} color="#3B82F6" />
                                         )}
                                     </TouchableOpacity>
                                 ))}
@@ -229,13 +229,13 @@ const styles = StyleSheet.create({
         paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: '#E5E7EB', backgroundColor: '#F9FAFB', flexDirection: 'row', alignItems: 'center', gap: 6
     },
     phaseItemSelected: {
-        backgroundColor: '#ECFDF5', borderColor: '#059669'
+        backgroundColor: '#EFF6FF', borderColor: '#3B82F6'
     },
     phaseItemDisabled: {
         backgroundColor: '#F3F4F6', opacity: 0.5
     },
     phaseText: { fontSize: 12, color: '#4B5563' },
-    phaseTextSelected: { color: '#065F46', fontWeight: '600' },
+    phaseTextSelected: { color: '#1D4ED8', fontWeight: '600' },
     footer: {
         flexDirection: 'row', padding: 16, borderTopWidth: 1, borderTopColor: '#F3F4F6', gap: 12
     },
@@ -246,7 +246,7 @@ const styles = StyleSheet.create({
         padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#FECACA', backgroundColor: '#FEF2F2', alignItems: 'center', justifyContent: 'center'
     },
     saveBtn: {
-        flex: 1, padding: 12, borderRadius: 8, backgroundColor: '#8B0000', alignItems: 'center'
+        flex: 1, padding: 12, borderRadius: 8, backgroundColor: '#3B82F6', alignItems: 'center'
     },
     cancelBtnText: { color: '#374151', fontWeight: '600' },
     saveBtnText: { color: '#fff', fontWeight: '600' },

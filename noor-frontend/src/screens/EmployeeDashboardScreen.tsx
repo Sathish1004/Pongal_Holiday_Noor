@@ -124,7 +124,7 @@ const EmployeeDashboardScreen = () => {
     };
 
     // Quick Status Box Component (Matching Admin)
-    const StatusBox = ({ label, icon, color = '#8B0000', count, onPress }: any) => (
+    const StatusBox = ({ label, icon, color = '#3B82F6', count, onPress }: any) => (
         <TouchableOpacity
             style={styles.statusBox}
             onPress={onPress}
@@ -315,7 +315,7 @@ const EmployeeDashboardScreen = () => {
                                 onPress={() => navigation.navigate('EmployeeProjectDetails', { siteId: item.id, siteName: item.name })}
                             >
                                 <View style={[styles.listIcon, { backgroundColor: '#FEF2F2' }]}>
-                                    <Ionicons name="business" size={24} color="#8B0000" />
+                                    <Ionicons name="business" size={24} color="#3B82F6" />
                                 </View>
                                 <View style={styles.listContent}>
                                     <Text style={styles.listTitle}>{item.name}</Text>
@@ -331,14 +331,14 @@ const EmployeeDashboardScreen = () => {
             {/* Bottom Navigation */}
             <View style={styles.bottomNav}>
                 <TouchableOpacity style={styles.navItem} onPress={() => setActiveTab('Dashboard')}>
-                    <Ionicons name="grid-outline" size={22} color={activeTab === 'Dashboard' ? '#8B0000' : '#9ca3af'} />
+                    <Ionicons name="grid-outline" size={22} color={activeTab === 'Dashboard' ? '#3B82F6' : '#9ca3af'} />
                     <Text style={[styles.navText, activeTab === 'Dashboard' && styles.navTextActive]}>Dashboard</Text>
                 </TouchableOpacity>
 
 
 
                 <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('EmployeeProfile')}>
-                    <Ionicons name="person-outline" size={22} color={activeTab === 'Profile' ? '#8B0000' : '#9ca3af'} />
+                    <Ionicons name="person-outline" size={22} color={activeTab === 'Profile' ? '#3B82F6' : '#9ca3af'} />
                     <Text style={[styles.navText, activeTab === 'Profile' && styles.navTextActive]}>Profile</Text>
                 </TouchableOpacity>
             </View>
@@ -396,7 +396,7 @@ const styles = StyleSheet.create({
         borderColor: '#fee2e2',
     },
     profileText: {
-        color: '#8B0000',
+        color: '#3B82F6',
         fontWeight: '800',
         fontSize: 16,
     },
@@ -520,7 +520,7 @@ const styles = StyleSheet.create({
         fontWeight: '500',
     },
     navTextActive: {
-        color: '#8B0000',
+        color: '#3B82F6',
         fontWeight: '700',
     },
 });

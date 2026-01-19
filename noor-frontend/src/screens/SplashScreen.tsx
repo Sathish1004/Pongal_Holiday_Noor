@@ -57,7 +57,7 @@ const SplashScreen = ({ navigation, onSkip }: SplashProps) => {
 
     return (
         <TouchableOpacity style={styles.container} onPress={handleNext} activeOpacity={1}>
-            <StatusBar barStyle="light-content" backgroundColor="#720e1e" />
+            <StatusBar barStyle="light-content" backgroundColor="#1d4ed8" />
 
             <View style={styles.contentContainer}>
                 {/* Animated Logo & Text */}
@@ -88,7 +88,7 @@ const SplashScreen = ({ navigation, onSkip }: SplashProps) => {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#8B0000', // Deep Red
+        backgroundColor: '#3B82F6', // Blue
         justifyContent: 'center',
         alignItems: 'center',
     },

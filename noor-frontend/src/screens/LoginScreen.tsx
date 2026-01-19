@@ -50,7 +50,7 @@ const LoginScreen = ({ navigation }: any) => {
                         <View style={styles.header}>
                             <View style={styles.logoContainer}>
                                 <View style={styles.logoIcon}>
-                                    <Ionicons name="business" size={40} color="#8B0000" />
+                                    <Ionicons name="business" size={40} color="#3B82F6" />
                                 </View>
                             </View>
                             <Text style={styles.title}>Welcome</Text>
@@ -252,12 +252,12 @@ const styles = StyleSheet.create({
         padding: 8,
     },
     loginButton: {
-        backgroundColor: '#8B0000',
+        backgroundColor: '#3B82F6',
         paddingVertical: 16,
         borderRadius: 14,
         alignItems: 'center',
         marginTop: 24,
-        shadowColor: '#8B0000',
+        shadowColor: '#3B82F6',
         shadowOffset: { width: 0, height: 6 },
         shadowOpacity: 0.2,
         shadowRadius: 12,
@@ -284,7 +284,7 @@ const styles = StyleSheet.create({
         marginBottom: 4,
     },
     brandName: {
-        color: '#8B0000',
+        color: '#3B82F6',
         fontWeight: '800',
     },
     copyright: {
