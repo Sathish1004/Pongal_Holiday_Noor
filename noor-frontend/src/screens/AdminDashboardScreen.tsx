@@ -31,11 +31,11 @@ import { useNavigation, useIsFocused } from "@react-navigation/native";
 import StageProgressScreen from "./StageProgressScreen";
 import ProjectTransactions from "../components/ProjectTransactions";
 import * as DocumentPicker from "expo-document-picker";
-import { NestableScrollContainer, NestableDraggableFlatList, ScaleDecorator, RenderItemParams } from "react-native-draggable-flatlist";
-
 declare const window: any;
 
 // Dummy Data for Projects Project List
+const SafeScrollContainer = ScrollView;
+
 const PROJECTS = [
   {
     id: "1",
@@ -2562,35 +2562,7 @@ const AdminDashboardScreen = () => {
 
 
 
-  const handleTaskReorder = async (data: any[], phaseId: number) => {
-    // 1. Optimistic Update
-    const newOrderMap = new Map();
-    data.forEach((task, index) => {
-      newOrderMap.set(task.id, index);
-    });
 
-    const updatedProjectTasks = projectTasks.map((t) => {
-      if (t.phase_id === phaseId && newOrderMap.has(t.id)) {
-        return { ...t, order_index: newOrderMap.get(t.id) };
-      }
-      return t;
-    });
-
-    setProjectTasks(updatedProjectTasks);
-
-    // 2. API Call
-    try {
-      const reorderPayload = data.map((task, index) => ({
-        id: task.id,
-        order_index: index,
-      }));
-      await api.put("/tasks/reorder", { tasks: reorderPayload });
-    } catch (error) {
-      console.error("Reorder failed", error);
-      showToast("Failed to save new order", "error");
-      // Optionally revert state here if critical
-    }
-  };
 
   const handleAddTask = async () => {
     if (!selectedSite || !newTaskName.trim() || !activePhaseId) {
@@ -3602,6 +3574,22 @@ Project Team`;
 
     return (
       <View style={{ flex: 1, backgroundColor: "#f9fafb" }}>
+        {/* Background Pattern */}
+        <Image
+          source={require('../../assets/construction-bg.png')}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: '100%',
+            height: '100%',
+            opacity: 0.05,
+            zIndex: -1
+          }}
+          resizeMode="repeat"
+        />
         {/* Header */}
         <View
           style={{
@@ -3946,6 +3934,22 @@ Project Team`;
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Background Pattern */}
+      <Image
+        source={require('../../assets/construction-bg.png')}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          width: '100%',
+          height: '100%',
+          opacity: 0.05,
+          zIndex: -1
+        }}
+        resizeMode="repeat"
+      />
       <StatusBar
         barStyle={Platform.OS === "ios" ? "dark-content" : "default"}
       />
@@ -4504,7 +4508,7 @@ Project Team`;
             })}
           </ScrollView>
 
-          <NestableScrollContainer style={styles.modalBody}>
+          <SafeScrollContainer style={styles.modalBody}>
             {activeProjectTab === "Tasks" && (
               <View style={styles.tabContentContainer}>
                 <View style={styles.sectionHeaderRow}>
@@ -4720,241 +4724,226 @@ Project Team`;
                                 {isExpanded && (
                                   <View style={styles.taskList}>
                                     {tasksInPhase.length > 0 ? (
-                                      <NestableDraggableFlatList
-                                        data={tasksInPhase}
-                                        keyExtractor={(item) => item.id.toString()}
-                                        onDragEnd={({ data }) => handleTaskReorder(data, phase.id)}
-                                        renderItem={({ item, drag, isActive }: any) => {
-                                          const task = item;
+                                      <View>
+                                        {tasksInPhase.map((task) => {
                                           const isCompleted =
                                             task.status === "Completed" ||
                                             task.status === "completed";
                                           return (
-                                            <ScaleDecorator>
+                                            <View
+                                              key={task.id}
+                                              style={[
+                                                styles.taskItem,
+                                                isCompleted && styles.taskItemCompleted,
+                                                isMobile && {
+                                                  flexDirection: "column",
+                                                  alignItems: "stretch",
+                                                  gap: 12,
+                                                },
+                                              ]}
+                                            >
                                               <View
-                                                style={[
-                                                  styles.taskItem,
-                                                  isCompleted && styles.taskItemCompleted,
-                                                  isActive && { backgroundColor: "#f0f9ff", borderColor: "#bae6fd" },
-                                                  isMobile && {
-                                                    flexDirection: "column",
-                                                    alignItems: "stretch",
-                                                    gap: 12,
-                                                  },
-                                                ]}
+                                                style={{
+                                                  flexDirection: "row",
+                                                  alignItems: "center",
+                                                  gap: 12,
+                                                  width: isMobile ? "100%" : "auto",
+                                                  flex: isMobile ? 0 : 1,
+                                                  minWidth: 200,
+                                                }}
                                               >
-                                                <View
-                                                  style={{
-                                                    flexDirection: "row",
-                                                    alignItems: "center",
-                                                    gap: 12,
-                                                    width: isMobile ? "100%" : "auto",
-                                                    flex: isMobile ? 0 : 1,
-                                                    minWidth: 200,
+                                                <TouchableOpacity
+                                                  style={[
+                                                    styles.radioButton,
+                                                    isCompleted &&
+                                                    styles.radioButtonSelected,
+                                                  ]}
+                                                >
+                                                  {isCompleted && (
+                                                    <Ionicons
+                                                      name="checkmark"
+                                                      size={12}
+                                                      color="#fff"
+                                                    />
+                                                  )}
+                                                </TouchableOpacity>
+                                                <TouchableOpacity
+                                                  style={{ flex: 1 }}
+                                                  onPress={() => {
+                                                    // Open Stage Progress / Chat View via Modal (to overlay over Project Modal)
+                                                    setChatPhaseId(phase.id);
+                                                    setChatTaskId(task.id);
+                                                    setChatSiteName(
+                                                      selectedSite?.name || "Site"
+                                                    );
                                                   }}
                                                 >
-                                                  {/* Drag Handle */}
-                                                  <TouchableOpacity
-                                                    onLongPress={drag}
-                                                    disabled={isActive}
-                                                    style={{ padding: 4 }}
-                                                  >
-                                                    <Ionicons name="reorder-three-outline" size={24} color="#9ca3af" />
-                                                  </TouchableOpacity>
-
-                                                  <TouchableOpacity
-                                                    style={[
-                                                      styles.radioButton,
-                                                      isCompleted &&
-                                                      styles.radioButtonSelected,
-                                                    ]}
-                                                  >
-                                                    {isCompleted && (
-                                                      <Ionicons
-                                                        name="checkmark"
-                                                        size={12}
-                                                        color="#fff"
-                                                      />
-                                                    )}
-                                                  </TouchableOpacity>
-                                                  <TouchableOpacity
-                                                    style={{ flex: 1 }}
-                                                    onPress={() => {
-                                                      // Open Stage Progress / Chat View via Modal (to overlay over Project Modal)
-                                                      setChatPhaseId(phase.id);
-                                                      setChatTaskId(task.id);
-                                                      setChatSiteName(
-                                                        selectedSite?.name || "Site"
-                                                      );
-                                                    }}
-                                                  >
-                                                    {(task.status ===
-                                                      "waiting_for_approval" ||
-                                                      task.status ===
-                                                      "Waiting Approval") && (
-                                                        <View
+                                                  {(task.status ===
+                                                    "waiting_for_approval" ||
+                                                    task.status ===
+                                                    "Waiting Approval") && (
+                                                      <View
+                                                        style={{
+                                                          backgroundColor: "#FEF9C3",
+                                                          alignSelf: "flex-start",
+                                                          paddingHorizontal: 8,
+                                                          paddingVertical: 2,
+                                                          borderRadius: 4,
+                                                          marginBottom: 4,
+                                                          borderWidth: 1,
+                                                          borderColor: "#FDE047",
+                                                        }}
+                                                      >
+                                                        <Text
                                                           style={{
-                                                            backgroundColor: "#FEF9C3",
-                                                            alignSelf: "flex-start",
-                                                            paddingHorizontal: 8,
-                                                            paddingVertical: 2,
-                                                            borderRadius: 4,
-                                                            marginBottom: 4,
-                                                            borderWidth: 1,
-                                                            borderColor: "#FDE047",
+                                                            color: "#854D0E",
+                                                            fontSize: 10,
+                                                            fontWeight: "bold",
                                                           }}
                                                         >
-                                                          <Text
-                                                            style={{
-                                                              color: "#854D0E",
-                                                              fontSize: 10,
-                                                              fontWeight: "bold",
-                                                            }}
-                                                          >
-                                                            🟡 Completed – Approval Pending
-                                                          </Text>
-                                                        </View>
-                                                      )}
-                                                    <Text style={styles.taskTitle}>
-                                                      {task.name}
-                                                    </Text>
-                                                    <Text style={styles.taskSubtitle}>
-                                                      {task.status}
-                                                    </Text>
-                                                  </TouchableOpacity>
-                                                </View>
+                                                          🟡 Completed – Approval Pending
+                                                        </Text>
+                                                      </View>
+                                                    )}
+                                                  <Text style={styles.taskTitle}>
+                                                    {task.name}
+                                                  </Text>
+                                                  <Text style={styles.taskSubtitle}>
+                                                    {task.status}
+                                                  </Text>
+                                                </TouchableOpacity>
+                                              </View>
 
-                                                <View
-                                                  style={{
-                                                    flexDirection: "row",
-                                                    alignItems: "center",
-                                                    gap: 8,
-                                                    justifyContent: isMobile
-                                                      ? "space-between"
-                                                      : "flex-end",
-                                                    width: isMobile ? "100%" : "auto",
-                                                  }}
-                                                >
-                                                  {user?.role === "admin" && (
-                                                    <View
-                                                      style={{
-                                                        flexDirection: "row",
-                                                        alignItems: "center",
-                                                        justifyContent: "flex-end",
-                                                        gap: 6,
-                                                      }}
-                                                    >
-                                                      {task.assignments &&
-                                                        task.assignments.length > 0 ? (
-                                                        <>
-                                                          <View
-                                                            style={{
-                                                              flexDirection: "row",
-                                                              gap: 6,
-                                                              flexWrap: "wrap",
-                                                              justifyContent: "flex-end",
-                                                            }}
-                                                          >
-                                                            {task.assignments.map(
-                                                              (assignment: any) => (
-                                                                <View
-                                                                  key={assignment.id}
-                                                                  style={
-                                                                    styles.employeeNameBadge
-                                                                  }
-                                                                >
-                                                                  <Text
-                                                                    style={{ fontSize: 10 }}
-                                                                  >
-                                                                    👷
-                                                                  </Text>
-                                                                  <Text
-                                                                    style={
-                                                                      styles.employeeNameText
-                                                                    }
-                                                                  >
-                                                                    {assignment.name
-                                                                      ? assignment.name.split(
-                                                                        " "
-                                                                      )[0]
-                                                                      : "Unknown"}
-                                                                  </Text>
-                                                                </View>
-                                                              )
-                                                            )}
-                                                            {task.due_date && (
+                                              <View
+                                                style={{
+                                                  flexDirection: "row",
+                                                  alignItems: "center",
+                                                  gap: 8,
+                                                  justifyContent: isMobile
+                                                    ? "space-between"
+                                                    : "flex-end",
+                                                  width: isMobile ? "100%" : "auto",
+                                                }}
+                                              >
+                                                {user?.role === "admin" && (
+                                                  <View
+                                                    style={{
+                                                      flexDirection: "row",
+                                                      alignItems: "center",
+                                                      justifyContent: "flex-end",
+                                                      gap: 6,
+                                                    }}
+                                                  >
+                                                    {task.assignments &&
+                                                      task.assignments.length > 0 ? (
+                                                      <>
+                                                        <View
+                                                          style={{
+                                                            flexDirection: "row",
+                                                            gap: 6,
+                                                            flexWrap: "wrap",
+                                                            justifyContent: "flex-end",
+                                                          }}
+                                                        >
+                                                          {task.assignments.map(
+                                                            (assignment: any) => (
                                                               <View
-                                                                style={[
-                                                                  styles.employeeNameBadge,
-                                                                  {
-                                                                    backgroundColor:
-                                                                      "#F3F4F6",
-                                                                    borderColor: "#D1D5DB",
-                                                                  },
-                                                                ]}
+                                                                key={assignment.id}
+                                                                style={
+                                                                  styles.employeeNameBadge
+                                                                }
                                                               >
                                                                 <Text
                                                                   style={{ fontSize: 10 }}
                                                                 >
-                                                                  📅
+                                                                  👷
                                                                 </Text>
                                                                 <Text
-                                                                  style={[
-                                                                    styles.employeeNameText,
-                                                                    { color: "#374151" },
-                                                                  ]}
+                                                                  style={
+                                                                    styles.employeeNameText
+                                                                  }
                                                                 >
-                                                                  Due:{" "}
-                                                                  {new Date(
-                                                                    task.due_date
-                                                                  ).toLocaleDateString(
-                                                                    "en-GB",
-                                                                    {
-                                                                      day: "2-digit",
-                                                                      month: "short",
-                                                                      year: "numeric",
-                                                                    }
-                                                                  )}
+                                                                  {assignment.name
+                                                                    ? assignment.name.split(
+                                                                      " "
+                                                                    )[0]
+                                                                    : "Unknown"}
                                                                 </Text>
                                                               </View>
-                                                            )}
-                                                          </View>
-                                                        </>
-                                                      ) : null}
+                                                            )
+                                                          )}
+                                                          {task.due_date && (
+                                                            <View
+                                                              style={[
+                                                                styles.employeeNameBadge,
+                                                                {
+                                                                  backgroundColor:
+                                                                    "#F3F4F6",
+                                                                  borderColor: "#D1D5DB",
+                                                                },
+                                                              ]}
+                                                            >
+                                                              <Text
+                                                                style={{ fontSize: 10 }}
+                                                              >
+                                                                📅
+                                                              </Text>
+                                                              <Text
+                                                                style={[
+                                                                  styles.employeeNameText,
+                                                                  { color: "#374151" },
+                                                                ]}
+                                                              >
+                                                                Due:{" "}
+                                                                {new Date(
+                                                                  task.due_date
+                                                                ).toLocaleDateString(
+                                                                  "en-GB",
+                                                                  {
+                                                                    day: "2-digit",
+                                                                    month: "short",
+                                                                    year: "numeric",
+                                                                  }
+                                                                )}
+                                                              </Text>
+                                                            </View>
+                                                          )}
+                                                        </View>
+                                                      </>
+                                                    ) : null}
 
-                                                      <TouchableOpacity
-                                                        style={styles.addAssigneeBtn}
-                                                        onPress={() =>
-                                                          handleAssignTask(task, phase)
-                                                        }
-                                                      >
-                                                        <Ionicons
-                                                          name="pencil"
-                                                          size={16}
-                                                          color="#374151"
-                                                        />
-                                                      </TouchableOpacity>
-                                                    </View>
-                                                  )}
+                                                    <TouchableOpacity
+                                                      style={styles.addAssigneeBtn}
+                                                      onPress={() =>
+                                                        handleAssignTask(task, phase)
+                                                      }
+                                                    >
+                                                      <Ionicons
+                                                        name="pencil"
+                                                        size={16}
+                                                        color="#374151"
+                                                      />
+                                                    </TouchableOpacity>
+                                                  </View>
+                                                )}
 
-                                                  <TouchableOpacity
-                                                    style={styles.iconButton}
-                                                    onPress={() =>
-                                                      handleDeleteTaskPress(task)
-                                                    }
-                                                  >
-                                                    <Ionicons
-                                                      name="trash-outline"
-                                                      size={16}
-                                                      color="#ef4444"
-                                                    />
-                                                  </TouchableOpacity>
-                                                </View>
+                                                <TouchableOpacity
+                                                  style={styles.iconButton}
+                                                  onPress={() =>
+                                                    handleDeleteTaskPress(task)
+                                                  }
+                                                >
+                                                  <Ionicons
+                                                    name="trash-outline"
+                                                    size={16}
+                                                    color="#ef4444"
+                                                  />
+                                                </TouchableOpacity>
                                               </View>
-                                            </ScaleDecorator>
+                                            </View>
                                           );
-                                        }}
-                                      />
+                                        })}
+                                      </View>
                                     ) : (
                                       <Text style={styles.noTasksText}>
                                         No tasks in this stage
@@ -5521,7 +5510,7 @@ Project Team`;
                 )}
               </View>
             )}
-          </NestableScrollContainer>
+          </SafeScrollContainer>
         </SafeAreaView>
       </Modal>
 
