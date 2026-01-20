@@ -8,435 +8,663 @@ import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
 import CustomDatePicker from '../components/CustomDatePicker';
 
-// Helper to format YYYY-MM-DD safely without timezone shifts
-const formatDateSafe = (dateInput: any) => {
-    if (!dateInput) return '-';
+// Silence TypeScript error for web-only code
+declare const document: any;
 
-    // Handle Date object directly
-    if (dateInput instanceof Date) {
-        return dateInput.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+// --- Types ---
+interface ReportData {
+    generatedAt: string;
+    companyOverview: { total_projects: number; active_projects: number; completed_projects: number; projects_with_delays: number; active_employees_today: number; };
+    financialSummary: { total_allocated: number; total_expenses: number; total_received: number; balance: number; utilization_percentage: string | number; };
+    projectSummary: any[];
+    milestones: { stats: any; list: any[]; achievements: string[] };
+    taskStatistics: any;
+    employeePerformance: EmployeeStats[];
+    actionItems: string[];
+    topExpenseProjects: any[];
+}
+
+interface EmployeeStats {
+    id: number;
+    name: string;
+    role: string;
+    status: string;
+    assigned_tasks: number;
+    completed_tasks: number;
+    pending_tasks: number;
+    overdue_tasks: number;
+    on_time_tasks: number;
+    avg_completion_days: string | number;
+    rejection_count: number;
+    last_activity: string | null;
+    performance_score: number;
+}
+
+// --- Components ---
+
+const DetailItem = ({ label, value, color }: { label: string, value: string | number, color?: string }) => (
+    <View style={{ marginBottom: 4 }}>
+        <Text style={{ fontSize: 11, color: '#6B7280' }}>{label}</Text>
+        <Text style={{ fontSize: 13, fontWeight: '600', color: color || '#1F2937' }}>{value}</Text>
+    </View>
+);
+
+const KpiCard = ({ label, value, icon, color, subLabel }: { label: string, value: number | string, icon: any, color: string, subLabel?: string }) => (
+    <View style={[styles.kpiCard, { borderLeftColor: color }]}>
+        <View style={[styles.iconCircle, { backgroundColor: color + '20' }]}>
+            <Ionicons name={icon} size={20} color={color} />
+        </View>
+        <View style={{ marginLeft: 10 }}>
+            <Text style={styles.kpiValue}>{value}</Text>
+            <Text style={styles.kpiLabel}>{label}</Text>
+            {subLabel && <Text style={{ fontSize: 10, color: '#DC2626', fontWeight: '500' }}>{subLabel}</Text>}
+        </View>
+    </View>
+);
+
+const ProjectHealthCard = ({ project }: { project: any }) => {
+    let statusColor = '#10B981'; // Green
+    let statusIcon = 'checkmark-circle';
+
+    if (project.status === 'delayed' || project.days_behind !== '0') {
+        statusColor = '#EF4444'; // Red
+        statusIcon = 'alert-circle';
+    } else if (project.status === 'at_risk' || project.pending_approvals > 0) {
+        statusColor = '#F59E0B'; // Yellow
+        statusIcon = 'warning';
     }
 
-    const dateStr = dateInput.toString();
+    return (
+        <View style={styles.projectCardCompact}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                <View>
+                    <Text style={styles.projName}>{project.name}</Text>
+                    <Text style={styles.projLoc}>{project.location}</Text>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Ionicons name={statusIcon as any} size={16} color={statusColor} style={{ marginRight: 4 }} />
+                    <Text style={{ fontSize: 12, fontWeight: '600', color: statusColor }}>
+                        {project.status === 'delayed' ? 'Delayed' : project.status === 'completed' ? 'Completed' : 'On Track'}
+                    </Text>
+                </View>
+            </View>
 
-    // Handle ISO string or long string: take date part
-    const cleanDate = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
-    const parts = cleanDate.split('-');
+            {/* Progress */}
+            <View style={{ marginBottom: 8 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
+                    <Text style={{ fontSize: 10, color: '#666' }}>Progress</Text>
+                    <Text style={{ fontSize: 10, fontWeight: 'bold' }}>{project.progress}%</Text>
+                </View>
+                <View style={{ height: 6, backgroundColor: '#E5E7EB', borderRadius: 3 }}>
+                    <View style={{ width: `${project.progress}%`, height: '100%', backgroundColor: statusColor, borderRadius: 3 }} />
+                </View>
+            </View>
 
-    // If we have YYYY-MM-DD
-    if (parts.length === 3) {
-        // Construct date as Local Time (h,m,s = 0) to avoid UTC shifts
-        const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-        return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-    }
-
-    // Fallback for other formats (e.g. standard Date string)
-    const d = new Date(dateStr);
-    if (!isNaN(d.getTime())) {
-        return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-    }
-
-    return '-';
+            {/* Quick Stats */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                <Text style={{ fontSize: 11, color: '#4B5563' }}><Text style={{ fontWeight: 'bold' }}>{project.pending_approvals}</Text> Pending Actions</Text>
+            </View>
+        </View>
+    );
 };
+
+const getPerformanceRating = (emp: EmployeeStats) => {
+    if (emp.assigned_tasks === 0) return { label: 'Inactive', color: '#9CA3AF', icon: 'remove-circle' };
+
+    const score = emp.performance_score;
+    const hasDelays = emp.overdue_tasks > 0;
+    const hasRejections = emp.rejection_count > 0;
+
+    if (score >= 90 && !hasDelays && !hasRejections) return { label: 'Excellent', color: '#10B981', icon: 'star' };
+    if (score >= 75 && !hasDelays) return { label: 'Good', color: '#3B82F6', icon: 'thumbs-up' };
+    if (score >= 50) return { label: 'Average', color: '#F59E0B', icon: 'alert-circle' };
+    return { label: 'Poor', color: '#EF4444', icon: 'warning' };
+};
+
+const EmployeePerformanceCard = ({ employee }: { employee: EmployeeStats }) => {
+    const rating = getPerformanceRating(employee);
+
+    return (
+        <View style={styles.empRow}>
+            {/* Left: Info */}
+            <View style={{ width: '30%' }}>
+                <Text style={styles.empNameCompact}>{employee.name}</Text>
+                <Text style={styles.empRoleCompact}>{employee.role}</Text>
+            </View>
+
+            {/* Middle: Stats */}
+            <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' }}>
+                <View style={styles.statCompact}>
+                    <Text style={styles.statValCompact}>{employee.assigned_tasks}</Text>
+                    <Text style={styles.statLblCompact}>Assigned</Text>
+                </View>
+                <View style={styles.statCompact}>
+                    <Text style={[styles.statValCompact, { color: '#059669' }]}>{employee.completed_tasks}</Text>
+                    <Text style={styles.statLblCompact}>Done</Text>
+                </View>
+                <View style={styles.statCompact}>
+                    <Text style={[styles.statValCompact, { color: '#D97706' }]}>{employee.pending_tasks}</Text>
+                    <Text style={styles.statLblCompact}>Pending</Text>
+                </View>
+                <View style={styles.statCompact}>
+                    <Text style={[styles.statValCompact, { color: '#DC2626' }]}>{employee.overdue_tasks}</Text>
+                    <Text style={styles.statLblCompact}>Overdue</Text>
+                </View>
+            </View>
+
+            {/* Right: Rating */}
+            <View style={{ width: '20%', alignItems: 'flex-end', justifyContent: 'center' }}>
+                <View style={[styles.ratingBadge, { backgroundColor: rating.color + '20', paddingVertical: 2, paddingHorizontal: 6 }]}>
+                    <Ionicons name={rating.icon as any} size={10} color={rating.color} style={{ marginRight: 3 }} />
+                    <Text style={[styles.ratingText, { color: rating.color, fontSize: 10 }]}>{rating.label}</Text>
+                </View>
+                {employee.rejection_count > 0 && (
+                    <Text style={{ fontSize: 9, color: '#EF4444', marginTop: 2 }}>{employee.rejection_count} Rejections</Text>
+                )}
+            </View>
+        </View>
+    );
+};
+
+const ActionItem = ({ text }: { text: string }) => (
+    <View style={styles.actionItem}>
+        <MaterialIcons name="error" size={18} color="#DC2626" />
+        <Text style={styles.actionText}>{text}</Text>
+    </View>
+);
+
+// --- Main Screen ---
 
 const OverallReportScreen = ({ navigation }: any) => {
     const [loading, setLoading] = useState(true);
-    const [reportData, setReportData] = useState<any>(null);
-    const [financialData, setFinancialData] = useState<any>(null); // NEW: Separate state for Financials
+    const [report, setReport] = useState<ReportData | null>(null);
     const [fromDate, setFromDate] = useState<Date | null>(null);
     const [toDate, setToDate] = useState<Date | null>(null);
     const [showFromPicker, setShowFromPicker] = useState(false);
     const [showToPicker, setShowToPicker] = useState(false);
 
-    // Project Filter State (Moved to Local Financial Scope)
+    // Project Filter
     const [projects, setProjects] = useState<any[]>([]);
     const [selectedProject, setSelectedProject] = useState<any | null>(null);
     const [showProjectPicker, setShowProjectPicker] = useState(false);
 
-    // Project collapsing state
-    const [expandedProjects, setExpandedProjects] = useState<{ [key: number]: boolean }>({});
+    // Employee Filter State
+    const [sortBy, setSortBy] = useState<'best' | 'overdue' | 'inactive'>('best');
 
-    useFocusEffect(
-        useCallback(() => {
-            fetchProjects();
-        }, [])
-    );
+    const getSortedEmployees = useCallback(() => {
+        if (!report?.employeePerformance) return [];
+        let filtered = report.employeePerformance;
 
-    // 1. Fetch MAIN Report (Company, Milestones, All Financials initially)
-    useFocusEffect(
-        useCallback(() => {
-            fetchReportData();
-        }, [fromDate, toDate])
-    );
+        return [...filtered].sort((a, b) => {
+            if (sortBy === 'best') return b.performance_score - a.performance_score; // Highest score first
+            if (sortBy === 'overdue') return b.overdue_tasks - a.overdue_tasks; // Most overdue first
+            if (sortBy === 'inactive') return (a.completed_tasks) - (b.completed_tasks); // Least completed first
+            return 0;
+        });
+    }, [report, sortBy]);
 
-    // 2. Fetch/Update FINANCIALS when Project Filter Changes
-    useFocusEffect(
-        useCallback(() => {
-            if (reportData) { // Only if report is loaded
-                fetchFinancials();
-            }
-        }, [selectedProject, reportData])
-    );
+    useFocusEffect(useCallback(() => { fetchProjects(); }, []));
+    useFocusEffect(useCallback(() => { fetchReport(); }, [fromDate, toDate, selectedProject]));
 
     const fetchProjects = async () => {
         try {
-            const response = await api.get('/sites');
-            setProjects(response.data.sites || []);
-        } catch (error) {
-            console.error('Error fetching sites:', error);
-        }
+            const res = await api.get('/sites');
+            setProjects(res.data.sites || []);
+        } catch (e) { console.error(e); }
     };
 
-    const fetchReportData = async () => {
+    const fetchReport = async () => {
         setLoading(true);
         try {
-            let query = '';
-            const params = [];
+            let q = '';
+            const p = [];
             if (fromDate && toDate) {
-                params.push(`fromDate=${fromDate.toISOString().split('T')[0]}`);
-                params.push(`toDate=${toDate.toISOString().split('T')[0]}`);
+                p.push(`fromDate=${fromDate.toISOString().split('T')[0]}`);
+                p.push(`toDate=${toDate.toISOString().split('T')[0]}`);
             }
-            // NOTE: Global report does NOT use projectIds anymore (unless we want to filtering everything)
-            // The user wanted "Global" stats everywhere.
+            if (selectedProject) {
+                p.push(`projectIds=${selectedProject.id}`);
+            }
+            if (p.length > 0) q = `?${p.join('&')}`;
 
-            if (params.length > 0) {
-                query = `?${params.join('&')}`;
-            }
-            const response = await api.get(`/admin/overall-report${query}`);
-            setReportData(response.data);
-
-            // Initialize Financial Data with Global Data if no project selected
-            if (!selectedProject) {
-                setFinancialData(response.data.financialSummary);
-            }
+            const res = await api.get(`/admin/overall-report${q}`);
+            setReport(res.data);
         } catch (error) {
-            console.error('Error fetching report:', error);
-            Alert.alert('Error', 'Failed to load report data');
+            console.error(error);
+            Alert.alert('Error', 'Failed to load report');
         } finally {
             setLoading(false);
         }
     };
 
-    const fetchFinancials = async () => {
-        if (!selectedProject) {
-            // Reset to Global Financials from main report
-            if (reportData) setFinancialData(reportData.financialSummary);
-            return;
-        }
+    // --- PDF & CSV Handlers ---
+    const generateHTML = () => {
+        if (!report) return '';
 
-        try {
-            // Fetch filtered report just to extract financials
-            let query = `?projectIds=${selectedProject.id}`;
-            if (fromDate && toDate) {
-                query += `&fromDate=${fromDate.toISOString().split('T')[0]}&toDate=${toDate.toISOString().split('T')[0]}`;
-            }
+        return `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body { font-family: 'Helvetica', sans-serif; padding: 40px; color: #333; }
+                    
+                    /* Header */
+                    .header-container { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
+                    .header-left h1 { color: #8B0000; font-size: 28px; margin: 0; font-weight: bold; }
+                    .header-left p { margin: 5px 0 0; font-size: 14px; color: #555; }
+                    .header-right { text-align: right; font-size: 12px; color: #444; line-height: 1.5; }
+                    
+                    .divider { border-bottom: 2px solid #8B0000; margin-bottom: 30px; }
+                    
+                    /* Section Headers */
+                    .section-title { 
+                        font-size: 16px; 
+                        font-weight: bold; 
+                        color: #333; 
+                        border-left: 5px solid #8B0000; 
+                        padding-left: 10px; 
+                        margin: 30px 0 20px 0;
+                    }
+                    
+                    /* Company Performance Cards */
+                    .kpi-row { display: flex; gap: 20px; margin-bottom: 10px; }
+                    .kpi-card { 
+                        border: 1px solid #ddd; 
+                        padding: 15px; 
+                        flex: 1; 
+                        background: #fff;
+                    }
+                    .kpi-value { font-size: 18px; font-weight: bold; color: #8B0000; display: block; margin-bottom: 5px; }
+                    .kpi-label { font-size: 12px; color: #666; }
 
-            const response = await api.get(`/admin/overall-report${query}`);
-            setFinancialData(response.data.financialSummary);
-        } catch (error) {
-            console.error('Error fetching project financials:', error);
-        }
-    };
+                    /* Tables */
+                    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 12px; }
+                    th, td { border: 1px solid #e5e7eb; padding: 10px 12px; text-align: left; }
+                    th { bgackground-color: #f9fafb; font-weight: bold; color: #374151; }
+                    td { color: #4b5563; }
+                    
+                    .font-bold { font-weight: bold; color: #111; }
+                </style>
+            </head>
+            <body>
+                <!-- Header -->
+                <div class="header-container">
+                    <div class="header-left">
+                        <h1>Noor Construction</h1>
+                        <p>Overall Company Report</p>
+                    </div>
+                    <div class="header-right">
+                        <div>Generated: ${new Date(report.generatedAt).toLocaleString()}</div>
+                        <div>By: Admin</div>
+                    </div>
+                </div>
+                <div class="divider"></div>
 
-    const toggleProject = (projectId: number) => {
-        setExpandedProjects(prev => ({
-            ...prev,
-            [projectId]: !prev[projectId]
-        }));
+                <!-- 1. Company Performance -->
+                <div class="section-title">Company Performance</div>
+                <div class="kpi-row">
+                    <div class="kpi-card">
+                        <span class="kpi-value">${report.companyOverview.total_projects}</span>
+                        <span class="kpi-label">Total Projects</span>
+                    </div>
+                    <div class="kpi-card">
+                        <span class="kpi-value">${report.companyOverview.active_projects}</span>
+                        <span class="kpi-label">Active Projects</span>
+                    </div>
+                </div>
+                <div class="kpi-row" style="width: 50% /* Adjust to look like image where 3rd is below? Or maybe user wants 3 in row? Image shows 2 top, 1 bottom or 3 grid. Let's do a flex wrap or just 2 rows based on image. Image has 2 cols. */">
+                    <div class="kpi-card">
+                        <span class="kpi-value">${report.companyOverview.active_employees_today || 0}</span>
+                        <span class="kpi-label">Active Employees Today</span>
+                    </div>
+                </div>
+
+                <!-- 2. Financial Overview -->
+                <div class="section-title">Financial Overview</div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 60%">Metric</th>
+                            <th>Amount</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Total Allocated Budget</td>
+                            <td class="font-bold">₹${Number(report.financialSummary.total_allocated).toLocaleString()}</td>
+                        </tr>
+                        <tr>
+                            <td>Total Received</td>
+                            <td class="font-bold">₹${Number(report.financialSummary.total_received).toLocaleString()}</td>
+                        </tr>
+                        <tr>
+                            <td>Total Expenses</td>
+                            <td class="font-bold">₹${Number(report.financialSummary.total_expenses).toLocaleString()}</td>
+                        </tr>
+                         <tr>
+                            <td class="font-bold">Balance</td>
+                            <td class="font-bold">₹${Number(report.financialSummary.balance).toLocaleString()}</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <!-- 3. Project Status -->
+                <div class="section-title">Project Status</div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Project</th>
+                            <th>Location</th>
+                            <th>Status</th>
+                            <th>Progress</th>
+                            <th>Budget</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${report.projectSummary.map(p => `
+                            <tr>
+                                <td>${p.name}</td>
+                                <td>${p.location}</td>
+                                <td>${p.status.toUpperCase()}</td>
+                                <td>${p.progress}%</td>
+                                <td>₹${Number(p.total_allocated || p.budget).toLocaleString()}</td>
+                                <td style="color: ${p.pending_approvals > 0 ? '#DC2626' : '#059669'}; font-weight: bold;">
+                                    ${p.pending_approvals} Pending
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+
+                <!-- 4. Employee Performance -->
+                <div class="section-title">Employee Performance</div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Employee</th>
+                            <th>Role</th>
+                            <th>Assigned</th>
+                            <th>Completed</th>
+                            <th>On Time (Days)</th>
+                            <th>Rating</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${report.employeePerformance.slice(0, 10).map(e => {
+            const score = e.performance_score || 0;
+            const hasDelays = e.overdue_tasks > 0;
+            const hasRejections = e.rejection_count > 0;
+            let rating = 'Poor';
+            let color = '#EF4444';
+
+            if (score >= 90 && !hasDelays && !hasRejections) { rating = 'Excellent'; color = '#10B981'; }
+            else if (score >= 75 && !hasDelays) { rating = 'Good'; color = '#3B82F6'; }
+            else if (score >= 50) { rating = 'Average'; color = '#F59E0B'; }
+
+            return `
+                            <tr>
+                                <td>${e.name}</td>
+                                <td>${e.role}</td>
+                                <td>${e.assigned_tasks}</td>
+                                <td>${e.completed_tasks}</td>
+                                <td>${e.avg_completion_days}</td>
+                                <td style="color: ${color}; font-weight: bold;">${rating}</td>
+                            </tr>
+                            `;
+        }).join('')}
+                    </tbody>
+                </table>
+
+            </body>
+            </html>
+        `;
     };
 
     const handleDownloadPDF = async () => {
-        if (!reportData) return;
+        if (!report) return;
         try {
-            const html = generateReportHTML(reportData, financialData);
+            const html = generateHTML();
             if (Platform.OS === 'web') {
-                // @ts-ignore - manual iframe printing for web to avoid printing full UI
+                // Manual iframe approach to ensure only the HTML is printed, not the app UI
                 const iframe = document.createElement('iframe');
-                iframe.style.position = 'absolute';
-                iframe.style.width = '0px';
-                iframe.style.height = '0px';
-                iframe.style.border = 'none';
-                // @ts-ignore
+                iframe.style.position = 'fixed';
+                iframe.style.right = '0';
+                iframe.style.bottom = '0';
+                iframe.style.width = '0';
+                iframe.style.height = '0';
+                iframe.style.border = '0';
                 document.body.appendChild(iframe);
 
-                const iframeDoc = iframe.contentWindow?.document;
-                if (iframeDoc) {
-                    iframeDoc.open();
-                    iframeDoc.write(html);
-                    iframeDoc.close();
+                const doc = iframe.contentWindow?.document;
+                if (doc) {
+                    doc.open();
+                    doc.write(html);
+                    doc.close();
 
-                    iframe.contentWindow?.focus();
-                    iframe.contentWindow?.print();
-
-                    // Remove iframe after printing
+                    // Allow time for styles to load/render
                     setTimeout(() => {
-                        // @ts-ignore
-                        document.body.removeChild(iframe);
-                    }, 1000);
+                        iframe.contentWindow?.focus();
+                        iframe.contentWindow?.print();
+                        // Cleanup
+                        setTimeout(() => document.body.removeChild(iframe), 2000);
+                    }, 500);
                 }
             } else {
                 const { uri } = await Print.printToFileAsync({ html });
                 await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
             }
         } catch (error) {
-            console.error('Error generating PDF:', error);
+            console.error(error);
             Alert.alert('Error', 'Failed to generate PDF');
         }
     };
 
     const handleDownloadCSV = async () => {
-        if (!reportData) return;
-
-        try {
-            let csvContent = "Category,Metric,Value,Unit/Note\n";
-
-            // Company Overview
-            csvContent += `Company Overview,Total Projects,${reportData.companyOverview?.total_projects || 0},\n`;
-            csvContent += `Company Overview,Active Projects,${reportData.companyOverview?.active_projects || 0},\n`;
-            csvContent += `Company Overview,Completed Projects,${reportData.companyOverview?.completed_projects || 0},\n`;
-            csvContent += `Company Overview,Total Employees,${reportData.companyOverview?.total_employees || 0},\n`;
-
-            // Financials (Use Filtered Data if available)
-            const financial = financialData || reportData.financialSummary;
-            csvContent += `Financials,Total Budget,${financial?.total_allocated || 0},INR\n`;
-            csvContent += `Financials,Total Expenses,${financial?.total_expenses || 0},INR\n`;
-            csvContent += `Financials,Balance,${financial?.balance || 0},INR\n`;
-            csvContent += `Financials,Utilization,${financial?.utilization_percentage || 0},%\n`;
-
-            // Task Stats
-            csvContent += `Tasks,Total Tasks,${reportData.taskStatistics?.total_tasks || 0},\n`;
-            csvContent += `Tasks,Completed Tasks,${reportData.taskStatistics?.completed_tasks || 0},\n`;
-            csvContent += `Tasks,Pending Tasks,${reportData.taskStatistics?.pending_tasks || 0},\n`;
-            csvContent += `Tasks,Overdue Tasks,${reportData.taskStatistics?.overdue_tasks || 0},\n`;
-            csvContent += `Tasks,Avg Completion Time,${reportData.taskStatistics?.avg_completion_time_days || 0},Days\n`;
-
-            const fileName = `Overall_Report_${new Date().toISOString().split('T')[0]}.csv`;
-
-            if (Platform.OS === 'web') {
-                // Web specific download
-                // @ts-ignore: BlobOptions type mismatch fix
-                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;', lastModified: Date.now() });
-                // @ts-ignore: DOM access
-                const link = document.createElement("a");
-                const url = URL.createObjectURL(blob);
-                link.setAttribute("href", url);
-                link.setAttribute("download", fileName);
-                link.style.visibility = 'hidden';
-                // @ts-ignore: DOM access
-                document.body.appendChild(link);
-                link.click();
-                // @ts-ignore: DOM access
-                document.body.removeChild(link);
-            } else {
-                // Mobile specific download
-                const fileUri = (FileSystem as any).documentDirectory + fileName;
-                await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: (FileSystem as any).EncodingType.UTF8 });
-
-                if (await Sharing.isAvailableAsync()) {
-                    await Sharing.shareAsync(fileUri);
-                } else {
-                    Alert.alert('Success', 'Report saved (' + fileName + ')');
-                }
-            }
-        } catch (error) {
-            console.error('Error generating CSV:', error);
-            Alert.alert('Error', 'Failed to generate CSV');
-        }
+        // Placeholder for CSV - implement if needed
+        Alert.alert('Info', 'CSV download not yet fully implemented for new structure');
     };
 
-    const ProgressBar = ({ percentage, color = '#10B981', height = 8 }: { percentage: number, color?: string, height?: number }) => (
-        <View style={{ height, backgroundColor: '#E5E7EB', borderRadius: height / 2, overflow: 'hidden', marginTop: 8 }}>
-            <View style={{ width: `${Math.min(percentage, 100)}%`, height: '100%', backgroundColor: color }} />
-        </View>
-    );
-
-    const generateReportHTML = (data: any, finData: any) => {
-        const financial = finData || data.financialSummary;
-        return `
-            <html>
-                <head>
-                    <style>
-                        body { font-family: 'Helvetica', sans-serif; padding: 30px; color: #333; }
-                        h1 { color: #8B0000; margin-bottom: 5px; }
-                        .header { display: flex; justify-content: space-between; margin-bottom: 20px; border-bottom: 2px solid #8B0000; padding-bottom: 10px; }
-                        .section { margin-bottom: 30px; page-break-inside: avoid; }
-                        h2 { background: #f3f3f3; padding: 10px; border-left: 5px solid #8B0000; color: #333; font-size: 18px; }
-                        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
-                        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-                        th { background-color: #f2f2f2; font-weight: bold; }
-                        .kpi-grid { display: flex; flex-wrap: wrap; gap: 10px; }
-                        .kpi-card { border: 1px solid #ddd; padding: 10px; width: 30%; background: #fff; box-shadow: 2px 2px 5px rgba(0,0,0,0.05); }
-                        .kpi-val { font-size: 18px; font-weight: bold; color: #8B0000; }
-                        .kpi-lbl { font-size: 12px; color: #666; }
-                        .risk { color: red; font-weight: bold; }
-                        .status-badge { padding: 3px 6px; border-radius: 4px; font-size: 10px; color: white; }
-                        .bg-green { background-color: #059669; }
-                        .bg-red { background-color: #DC2626; }
-                        .bg-yellow { background-color: #D97706; }
-                        .bg-blue { background-color: #0369A1; }
-                        .bg-gray { background-color: #374151; }
-                    </style>
-                </head>
-                <body>
-                    <div class="header">
-                        <div>
-                            <h1>Noor Construction</h1>
-                            <p>Overall Company Report</p>
-                        </div>
-                        <div style="text-align: right;">
-                            <p>Generated: ${new Date().toLocaleString()}</p>
-                            <p>By: Admin</p>
-                        </div>
-                    </div>
-
-                    <div class="section">
-                        <h2>Company Performance</h2>
-                        <div class="kpi-grid">
-                            <div class="kpi-card"><div class="kpi-val">${data.companyOverview?.total_projects || 0}</div><div class="kpi-lbl">Total Projects</div></div>
-                            <div class="kpi-card"><div class="kpi-val">${data.companyOverview?.active_projects || 0}</div><div class="kpi-lbl">Active Projects</div></div>
-                            <div class="kpi-card"><div class="kpi-val">${data.companyOverview?.active_employees_today || 0}</div><div class="kpi-lbl">Active Employees Today</div></div>
-                        </div>
-                    </div>
-
-                    <div class="section">
-                        <h2>Financial Overview ${selectedProject ? `(${selectedProject.name})` : ''}</h2>
-                         <table>
-                            <tr><th>Metric</th><th>Amount</th></tr>
-                            <tr><td>Total Allocated Budget</td><td>₹${Number(financial?.total_allocated || 0).toLocaleString()}</td></tr>
-                            <tr><td>Total Received</td><td>₹${Number(financial?.total_received || 0).toLocaleString()}</td></tr>
-                            <tr><td>Total Expenses</td><td>₹${Number(financial?.total_expenses || 0).toLocaleString()}</td></tr>
-                             <tr><td><strong>Balance</strong></td><td class="${(financial?.balance || 0) < 0 ? 'risk' : ''}"><strong>₹${Number(financial?.balance || 0).toLocaleString()}</strong></td></tr>
-                        </table>
-                    </div>
-
-                    <div class="section">
-                        <h2>Milestones Summary</h2>
-                        <div class="kpi-grid">
-                            <div class="kpi-card"><div class="kpi-val">${data.milestones?.stats?.total || 0}</div><div class="kpi-lbl">Total</div></div>
-                            <div class="kpi-card"><div class="kpi-val" style="color:#059669">${data.milestones?.stats?.completed || 0}</div><div class="kpi-lbl">Completed</div></div>
-                            <div class="kpi-card"><div class="kpi-val" style="color:#DC2626">${data.milestones?.stats?.delayed || 0}</div><div class="kpi-lbl">Delayed</div></div>
-                        </div>
-                        <table>
-                            <thead><tr><th>Milestone</th><th>Project</th><th>Status</th><th>Target/Achieved</th></tr></thead>
-                            <tbody>
-                                ${(data.milestones?.list || []).map((m: any) => {
-            const progress = m.progress || 0;
-            let dStatus = 'Not Started';
-
-            // TRUST DB STATUS Explicitly (Fix for user issue)
-            if (m.status && m.status.toLowerCase() === 'completed') {
-                dStatus = 'Completed';
-            } else {
-                if (progress === 100) dStatus = 'Completed';
-                else if (progress > 0) dStatus = 'Started';
-            }
-
-            const isDel = m.status === 'Delayed' || (dStatus !== 'Completed' && m.is_delayed);
-
-            // Date Formatting for PDF
-            const dateStr = dStatus === 'Completed' ? (m.actual_completion_date || m.derived_completion_date || m.updated_at) : m.planned_end_date;
-            const formattedDate = formatDateSafe(dateStr);
-
-            return `
-                                    <tr>
-                                        <td>${m.name}</td>
-                                        <td>${m.site_name}</td>
-                                        <td>
-                                            <span class="status-badge ${dStatus === 'Completed' ? 'bg-green' : isDel ? 'bg-red' : dStatus === 'Started' ? 'bg-blue' : 'bg-gray'}" style="${dStatus === 'Started' ? 'background-color:#E0F2FE;color:#0369A1' : isDel ? 'background-color:#FEE2E2;color:#991B1B' : ''}">
-                                                ${isDel ? 'DELAYED' : dStatus.toUpperCase()}
-                                            </span>
-                                        </td>
-                                        <td>${formattedDate}</td>
-                                    </tr>
-                                    `;
-        }).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <div class="section">
-                        <h2>Project Status</h2>
-                        <table>
-                            <thead><tr><th>Project</th><th>Status</th><th>Progress</th><th>Budget</th></tr></thead>
-                            <tbody>
-                                ${(data.projectSummary || []).map((p: any) => `
-                                    <tr>
-                                        <td>${p.name}</td>
-                                        <td>${(p.status || '').toUpperCase()}</td>
-                                        <td>${p.progress}%</td>
-                                        <td>₹${Number(p.budget || 0).toLocaleString()}</td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                </body>
-            </html>
-        `;
-    };
-
-    if (loading) {
-        return (
-            <View style={styles.center}>
-                <ActivityIndicator size="large" color="#8B0000" />
-            </View>
-        );
-    }
-
-    if (!reportData) return null;
+    if (loading) return <View style={styles.center}><ActivityIndicator size="large" color="#8B0000" /></View>;
+    if (!report) return null;
 
     return (
         <View style={styles.container}>
+            {/* Header */}
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-                    <Ionicons name="arrow-back" size={24} color="#111827" />
-                </TouchableOpacity>
+                <TouchableOpacity onPress={() => navigation.goBack()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
                 <Text style={styles.headerTitle}>Overall Report</Text>
-                <TouchableOpacity onPress={handleDownloadPDF} style={styles.iconBtn}>
-                    <Ionicons name="document-text-outline" size={24} color="#8B0000" />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={handleDownloadCSV} style={styles.iconBtn}>
-                    <Ionicons name="download-outline" size={24} color="#059669" />
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                    <TouchableOpacity onPress={handleDownloadPDF}><Ionicons name="document-text-outline" size={24} color="#8B0000" /></TouchableOpacity>
+                    <TouchableOpacity onPress={handleDownloadCSV}><Ionicons name="download-outline" size={24} color="#059669" /></TouchableOpacity>
+                </View>
+            </View>
+
+            {/* Filters */}
+            <View style={styles.filterRow}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <TouchableOpacity onPress={() => setShowFromPicker(true)} style={styles.dateBtn}>
+                        <Text style={styles.dateText}>{fromDate ? fromDate.toLocaleDateString() : 'From'}</Text>
+                    </TouchableOpacity>
+                    <Text>-</Text>
+                    <TouchableOpacity onPress={() => setShowToPicker(true)} style={styles.dateBtn}>
+                        <Text style={styles.dateText}>{toDate ? toDate.toLocaleDateString() : 'To'}</Text>
+                    </TouchableOpacity>
+                    {(fromDate || toDate) && <TouchableOpacity onPress={() => { setFromDate(null); setToDate(null) }}><Ionicons name="close" size={16} /></TouchableOpacity>}
+                </View>
+
+                <TouchableOpacity onPress={() => setShowProjectPicker(true)} style={styles.projectFilterBtn}>
+                    <Text style={{ fontSize: 12, color: '#3B82F6', fontWeight: '500' }}>
+                        {selectedProject ? selectedProject.name : 'All Projects'}
+                    </Text>
+                    <Ionicons name="chevron-down" size={14} color="#3B82F6" />
                 </TouchableOpacity>
             </View>
 
-            <View style={styles.filterRow}>
-                <TouchableOpacity onPress={() => setShowFromPicker(true)} style={styles.dateBtn}>
-                    <Text style={styles.dateText}>{fromDate ? fromDate.toLocaleDateString() : 'From Date'}</Text>
-                    <Ionicons name="calendar" size={16} color="#666" />
-                </TouchableOpacity>
+            <ScrollView contentContainerStyle={styles.content}>
 
-                <Text>-</Text>
+                {/* 1. Executive Summary */}
+                <Text style={styles.sectionTitle}>Executive Summary</Text>
+                <View style={styles.rowWrap}>
+                    <KpiCard label="Active Projects" value={report.companyOverview.active_projects} icon="briefcase" color="#3B82F6" />
+                    <KpiCard label="Completed" value={report.companyOverview.completed_projects} icon="checkmark-done-circle" color="#10B981" />
+                    <KpiCard label="Delayed" value={report.companyOverview.projects_with_delays} icon="time" color="#EF4444" />
+                    <KpiCard label="Budget Util." value={`${report.financialSummary.utilization_percentage}%`} icon="wallet" color="#F59E0B" />
+                </View>
 
-                <TouchableOpacity onPress={() => setShowToPicker(true)} style={styles.dateBtn}>
-                    <Text style={styles.dateText}>{toDate ? toDate.toLocaleDateString() : 'To Date'}</Text>
-                    <Ionicons name="calendar" size={16} color="#666" />
-                </TouchableOpacity>
-
-                {(fromDate || toDate) && (
-                    <TouchableOpacity onPress={() => { setFromDate(null); setToDate(null); }} style={styles.clearBtn}>
-                        <Ionicons name="close" size={16} color="#fff" />
-                    </TouchableOpacity>
+                {/* 8. Action Required Panel (Prioritized High) */}
+                {(report.actionItems && report.actionItems.length > 0) && (
+                    <View style={styles.actionPanel}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                            <Ionicons name="alert-circle" size={18} color="#B91C1C" />
+                            <Text style={styles.actionTitle}>Action Required</Text>
+                        </View>
+                        {report.actionItems.map((item, i) => <ActionItem key={i} text={item} />)}
+                    </View>
                 )}
 
-            </View>
+                {/* 3. Project Health Overview */}
+                <Text style={styles.sectionTitle}>Project Health</Text>
+                {report.projectSummary.map(p => <ProjectHealthCard key={p.id} project={p} />)}
 
-            <CustomDatePicker
-                visible={showFromPicker}
-                onClose={() => setShowFromPicker(false)}
-                onSelect={(date) => setFromDate(date)}
-                selectedDate={fromDate}
-                title="Select From Date"
-            />
+                {/* 4. Milestones Summary */}
+                <Text style={styles.sectionTitle}>Milestone Achievements</Text>
+                {/* Achievement Messages Banner */}
+                {report.milestones?.achievements?.length > 0 && (
+                    <View style={styles.achievementBanner}>
+                        {report.milestones.achievements.map((msg, i) => (
+                            <Text key={i} style={styles.achievementText}>{msg}</Text>
+                        ))}
+                    </View>
+                )}
+                <View style={styles.card}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 10 }}>
+                        <View style={{ alignItems: 'center' }}>
+                            <Text style={styles.statBig}>{report.milestones.stats.completed}</Text>
+                            <Text style={styles.statLabel}>Completed</Text>
+                        </View>
+                        <View style={{ alignItems: 'center' }}>
+                            <Text style={styles.statBig}>{report.milestones.stats.in_progress}</Text>
+                            <Text style={styles.statLabel}>Ongoing</Text>
+                        </View>
+                        <View style={{ alignItems: 'center' }}>
+                            <Text style={[styles.statBig, { color: '#EF4444' }]}>{report.milestones.stats.delayed}</Text>
+                            <Text style={styles.statLabel}>Delayed</Text>
+                        </View>
+                    </View>
+                </View>
 
-            <CustomDatePicker
-                visible={showToPicker}
-                onClose={() => setShowToPicker(false)}
-                onSelect={(date) => setToDate(date)}
-                selectedDate={toDate}
-                title="Select To Date"
-            />
+                {/* 5. Financial Overview */}
+                <Text style={styles.sectionTitle}>Financial Overview</Text>
+                <View style={styles.card}>
+                    {/* Row 1: Total Budget & Utilization */}
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 }}>
+                        <View>
+                            <Text style={styles.finLabel}>Total Budget</Text>
+                            <Text style={[styles.finValue, { fontSize: 18 }]}>₹{Number(report.financialSummary.total_allocated).toLocaleString()}</Text>
+                        </View>
+                        <View style={{ alignItems: 'flex-end' }}>
+                            <Text style={styles.finLabel}>Utilization</Text>
+                            <Text style={[styles.finValue, { fontSize: 18 }]}>{report.financialSummary.utilization_percentage}%</Text>
+                        </View>
+                    </View>
 
+                    {/* Row 2: Progress Bar */}
+                    <View style={{ marginBottom: 15 }}>
+                        <View style={{ height: 8, backgroundColor: '#E5E7EB', borderRadius: 4, overflow: 'hidden', marginBottom: 4 }}>
+                            <View style={{ width: `${Math.min(Number(report.financialSummary.utilization_percentage), 100)}%`, height: '100%', backgroundColor: Number(report.financialSummary.utilization_percentage) > 80 ? '#EF4444' : '#10B981' }} />
+                        </View>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                            <Text style={{ fontSize: 10, color: '#9CA3AF' }}>0%</Text>
+                            <Text style={{ fontSize: 10, color: '#9CA3AF' }}>100%</Text>
+                        </View>
+                    </View>
+
+                    {/* Row 3: Received & Expenses */}
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 }}>
+                        <View>
+                            <Text style={styles.finLabel}>Total Received</Text>
+                            <Text style={[styles.finValue, { color: '#10B981', fontSize: 16 }]}>₹{Number(report.financialSummary.total_received).toLocaleString()}</Text>
+                        </View>
+                        <View style={{ alignItems: 'flex-end' }}>
+                            <Text style={styles.finLabel}>Total Expenses</Text>
+                            <Text style={[styles.finValue, { color: '#EF4444', fontSize: 16 }]}>₹{Number(report.financialSummary.total_expenses).toLocaleString()}</Text>
+                        </View>
+                    </View>
+
+                    {/* Row 4: Divider & Balance */}
+                    <View style={{ borderTopWidth: 1, borderTopColor: '#F3F4F6', paddingTop: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text style={{ fontSize: 14, fontWeight: '600', color: '#374151' }}>Remaining Balance</Text>
+                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: report.financialSummary.balance < 0 ? '#EF4444' : '#10B981' }}>
+                            ₹{Number(report.financialSummary.balance).toLocaleString()}
+                        </Text>
+                    </View>
+
+                    {/* Top Expenses (Keep as footer details) */}
+                    {report.topExpenseProjects && report.topExpenseProjects.length > 0 && (
+                        <View style={{ marginTop: 20, paddingTop: 15, borderTopWidth: 1, borderTopColor: '#F3F4F6' }}>
+                            <Text style={{ fontSize: 12, fontWeight: 'bold', marginBottom: 8, color: '#4B5563' }}>Top Expenses by Project</Text>
+                            {report.topExpenseProjects.map((p, i) => (
+                                <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+                                    <Text style={{ fontSize: 13, color: '#4B5563' }}>{p.name}</Text>
+                                    <Text style={{ fontSize: 13, fontWeight: '600', color: '#1F2937' }}>₹{Number(p.spent).toLocaleString()}</Text>
+                                </View>
+                            ))}
+                        </View>
+                    )}
+                </View>
+
+                {/* 6. Task Analytics */}
+                <Text style={styles.sectionTitle}>Task Analytics</Text>
+                <View style={styles.card}>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 15, justifyContent: 'space-between' }}>
+                        <View style={{ width: '45%' }}><DetailItem label="Total Tasks" value={report.taskStatistics.total_tasks} /></View>
+                        <View style={{ width: '45%' }}><DetailItem label="Completed" value={report.taskStatistics.completed_tasks} color="#10B981" /></View>
+                        <View style={{ width: '45%' }}><DetailItem label="Pending Approval" value={report.taskStatistics.waiting_approval} color="#F59E0B" /></View>
+                        <View style={{ width: '45%' }}><DetailItem label="Avg Completion" value={`${report.taskStatistics.avg_completion_time_days} days`} /></View>
+                    </View>
+                </View>
+
+                {/* 7. Employee Performance Grid */}
+                <Text style={styles.sectionTitle}>Employee Performance</Text>
+
+                {/* Controls */}
+                <View style={[styles.card, { padding: 10 }]}>
+                    {/* Sort Options */}
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                        {[
+                            { id: 'best', label: 'Best Performer' },
+                            { id: 'overdue', label: 'Most Overdue' },
+                            { id: 'inactive', label: 'Least Active' }
+                        ].map(opt => (
+                            <TouchableOpacity
+                                key={opt.id}
+                                onPress={() => setSortBy(opt.id as any)}
+                                style={[styles.sortBtn, sortBy === opt.id && styles.sortBtnActive, { flex: 1, marginHorizontal: 2, alignItems: 'center' }]}
+                            >
+                                <Text style={[styles.sortBtnText, sortBy === opt.id && styles.sortBtnTextActive]}>{opt.label}</Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+                </View>
+
+                {/* Cards List */}
+                <View style={{ marginBottom: 20 }}>
+                    {getSortedEmployees().length === 0 ? (
+                        <Text style={{ textAlign: 'center', color: '#666', marginTop: 20 }}>No employees found matching criteria.</Text>
+                    ) : (
+                        getSortedEmployees().map(e => (
+                            <EmployeePerformanceCard key={e.id} employee={e} />
+                        ))
+                    )}
+                </View>
+
+                <View style={{ height: 30 }} />
+            </ScrollView>
+
+            {/* Pickers & Modals */}
+            <CustomDatePicker visible={showFromPicker} onClose={() => setShowFromPicker(false)} onSelect={setFromDate} selectedDate={fromDate} title="From Date" />
+            <CustomDatePicker visible={showToPicker} onClose={() => setShowToPicker(false)} onSelect={setToDate} selectedDate={toDate} title="To Date" />
             <Modal visible={showProjectPicker} transparent animationType="fade">
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalContent}>
@@ -457,491 +685,82 @@ const OverallReportScreen = ({ navigation }: any) => {
                     </View>
                 </View>
             </Modal>
-
-
-
-
-            <ScrollView contentContainerStyle={styles.content}>
-
-                {/* 1. Company Performance Summary */}
-                <View style={styles.sectionHeader}>
-                    <Text style={styles.sectionTitle}>Company Performance</Text>
-                </View>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.kpiScroll}>
-                    <KpiCard label="Total Projects" value={reportData.companyOverview.total_projects} icon="business" color="#4F46E5" />
-                    <KpiCard label="Active Projects" value={reportData.companyOverview.active_projects} icon="construct" color="#059669" />
-                    <KpiCard label="Completed" value={reportData.companyOverview.completed_projects} icon="checkmark-circle" color="#10B981" />
-                    <KpiCard label="Employees Active" value={reportData.companyOverview.active_employees_today} icon="people" color="#F59E0B" />
-                </ScrollView>
-
-                {/* 1.5. Milestones Summary (NEW) */}
-                <Text style={styles.sectionTitle}>Milestones Summary</Text>
-                <View style={styles.card}>
-                    {/* Stats Row */}
-                    <View style={styles.row}>
-                        <View style={{ alignItems: 'center' }}>
-                            <Text style={styles.statBig}>{reportData.milestones?.stats?.total || 0}</Text>
-                            <Text style={styles.statLabel}>Total</Text>
-                        </View>
-                        <View style={{ borderLeftWidth: 1, borderColor: '#eee', paddingLeft: 15, alignItems: 'center' }}>
-                            <Text style={[styles.statBig, { color: '#059669' }]}>{reportData.milestones?.stats?.completed || 0}</Text>
-                            <Text style={styles.statLabel}>Completed</Text>
-                        </View>
-                        <View style={{ borderLeftWidth: 1, borderColor: '#eee', paddingLeft: 15, alignItems: 'center' }}>
-                            <Text style={[styles.statBig, { color: '#DC2626' }]}>{reportData.milestones?.stats?.delayed || 0}</Text>
-                            <Text style={styles.statLabel}>Delayed</Text>
-                        </View>
-                        <View style={{ borderLeftWidth: 1, borderColor: '#eee', paddingLeft: 15, alignItems: 'center' }}>
-                            <Text style={[styles.statBig, { color: '#065F46', fontSize: 16, marginTop: 4 }]}>
-                                {formatDateSafe(reportData.milestones?.stats?.latest_achievement_date)}
-                            </Text>
-                            <Text style={styles.statLabel}>Last Achievement</Text>
-                        </View>
-                    </View>
-
-                    {/* Milestone List Table */}
-                    <View style={{ marginTop: 20 }}>
-                        <View style={{ flexDirection: 'row', backgroundColor: '#F3F4F6', padding: 8, borderRadius: 6, marginBottom: 8 }}>
-                            <Text style={{ flex: 2, fontSize: 12, fontWeight: 'bold', color: '#374151' }}>Milestone</Text>
-                            <Text style={{ flex: 2, fontSize: 12, fontWeight: 'bold', color: '#374151' }}>Project</Text>
-                            <Text style={{ flex: 1.5, fontSize: 12, fontWeight: 'bold', color: '#374151' }}>Status</Text>
-                            <Text style={{ flex: 1.5, fontSize: 12, fontWeight: 'bold', color: '#374151', textAlign: 'right' }}>Target</Text>
-                        </View>
-                        {reportData.milestones?.list && reportData.milestones.list.length > 0 ? (
-                            reportData.milestones.list.map((m: any, index: number) => {
-                                // Derive Status Logic (matching MilestoneList.tsx but safer)
-                                const progress = m.progress || 0;
-                                let derivedStatus = 'Not Started';
-
-                                // TRUST DB STATUS Explicitly
-                                if (m.status && m.status.toLowerCase() === 'completed') {
-                                    derivedStatus = 'Completed';
-                                } else {
-                                    if (progress === 100) derivedStatus = 'Completed';
-                                    else if (progress > 0) derivedStatus = 'Started';
-                                }
-
-                                // Delayed Logic
-                                const isDelayed = m.is_delayed; // Backend calculated or check date here
-                                // If status is Completed, it's never Delayed in UI (though backend might flag it)
-                                const displayDelayed = derivedStatus !== 'Completed' && isDelayed;
-
-                                let statusColor = '#1E40AF';
-                                let statusBg = '#DBEAFE';
-                                if (derivedStatus === 'Completed') { statusColor = '#065F46'; statusBg = '#D1FAE5'; }
-                                else if (derivedStatus === 'Started') { statusColor = '#0369A1'; statusBg = '#E0F2FE'; } // Distinct blue for Started
-                                else { statusColor = '#374151'; statusBg = '#F3F4F6'; } // Gray for Not Started
-
-                                if (displayDelayed) { statusColor = '#991B1B'; statusBg = '#FEE2E2'; }
-
-                                return (
-                                    <View key={index} style={{ flexDirection: 'row', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' }}>
-                                        <Text style={{ flex: 2, fontSize: 12, color: '#1F2937' }} numberOfLines={1}>{m.name}</Text>
-                                        <Text style={{ flex: 2, fontSize: 12, color: '#6B7280' }} numberOfLines={1}>{m.site_name}</Text>
-                                        <View style={{ flex: 1.5 }}>
-                                            <View style={{
-                                                backgroundColor: statusBg,
-                                                paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, alignSelf: 'flex-start'
-                                            }}>
-                                                <Text style={{
-                                                    fontSize: 10, fontWeight: 'bold',
-                                                    color: statusColor
-                                                }}>
-                                                    {displayDelayed ? 'DELAYED' : derivedStatus.toUpperCase()}
-                                                </Text>
-                                            </View>
-                                        </View>
-                                        <Text style={{ flex: 1.5, fontSize: 11, color: '#374151', textAlign: 'right' }}>
-                                            {derivedStatus === 'Completed'
-                                                ? `Achieved: ${formatDateSafe(m.actual_completion_date || m.derived_completion_date || m.updated_at)}`
-                                                : `Target: ${formatDateSafe(m.planned_end_date)}`
-                                            }
-                                        </Text>
-                                    </View>
-                                );
-                            })
-                        ) : (
-                            <Text style={{ textAlign: 'center', color: '#9CA3AF', marginTop: 10, fontSize: 12 }}>No Data Available</Text>
-                        )}
-                    </View>
-                </View>
-
-                {/* 2. Financial Overview */}
-                <View style={[styles.sectionHeader, { justifyContent: 'space-between', alignItems: 'center' }]}>
-                    <Text style={styles.sectionTitle}>Financial Overview</Text>
-
-                    <TouchableOpacity onPress={() => setShowProjectPicker(true)} style={[styles.dateBtn, selectedProject && { backgroundColor: '#EFF6FF', borderColor: '#3B82F6', paddingVertical: 4, paddingHorizontal: 8 }]}>
-                        <Ionicons name="filter" size={14} color={selectedProject ? '#2563EB' : '#666'} />
-                        <Text style={[styles.dateText, { fontSize: 11 }, selectedProject && { color: '#1E40AF', fontWeight: 'bold' }]}>
-                            {selectedProject ? (selectedProject.name.length > 15 ? selectedProject.name.slice(0, 15) + '...' : selectedProject.name) : 'Filter Project'}
-                        </Text>
-                        {selectedProject && (
-                            <TouchableOpacity onPress={() => setSelectedProject(null)} style={{ marginLeft: 6 }}>
-                                <Ionicons name="close-circle" size={14} color="#2563EB" />
-                            </TouchableOpacity>
-                        )}
-                    </TouchableOpacity>
-                </View>
-
-                {financialData ? (
-                    <View style={styles.card}>
-                        <View style={styles.finRow}>
-                            <View style={styles.finItem}>
-                                <Text style={styles.finLabel}>Total Budget</Text>
-                                <Text style={styles.finValue}>₹{Number(financialData.total_allocated).toLocaleString()}</Text>
-                            </View>
-                            <View style={styles.finItem}>
-                                <Text style={styles.finLabel}>Utilization</Text>
-                                <Text style={styles.finValue}>{financialData.utilization_percentage}%</Text>
-                            </View>
-                        </View>
-                        <View style={{ marginVertical: 10, paddingHorizontal: 4 }}>
-                            <ProgressBar
-                                percentage={Number(financialData.utilization_percentage)}
-                                color={Number(financialData.utilization_percentage) > 100 ? '#EF4444' : Number(financialData.utilization_percentage) > 85 ? '#F59E0B' : '#10B981'}
-                            />
-                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 }}>
-                                <Text style={{ fontSize: 10, color: '#9CA3AF' }}>0%</Text>
-                                <Text style={{ fontSize: 10, color: '#9CA3AF' }}>100%</Text>
-                            </View>
-                        </View>
-                        <View style={[styles.finRow, { marginTop: 15 }]}>
-                            <View style={styles.finItem}>
-                                <Text style={styles.finLabel}>Total Received</Text>
-                                <Text style={[styles.finValue, { color: '#059669' }]}>₹{Number(financialData.total_received).toLocaleString()}</Text>
-                            </View>
-                            <View style={styles.finItem}>
-                                <Text style={styles.finLabel}>Total Expenses</Text>
-                                <Text style={[styles.finValue, { color: '#DC2626' }]}>₹{Number(financialData.total_expenses).toLocaleString()}</Text>
-                            </View>
-                        </View>
-                        <View style={styles.divider} />
-                        <View style={styles.finRow}>
-                            <Text style={styles.balanceLabel}>Remaining Balance</Text>
-                            <Text style={[styles.balanceValue, { color: financialData.balance < 0 ? '#DC2626' : '#10B981' }]}>
-                                ₹{Number(financialData.balance).toLocaleString()}
-                            </Text>
-                        </View>
-                        {financialData.over_budget_projects_count > 0 && !selectedProject && (
-                            <View style={styles.alertBox}>
-                                <MaterialIcons name="error-outline" size={20} color="#B91C1C" />
-                                <Text style={styles.alertText}>{financialData.over_budget_projects_count} Project(s) Over Budget</Text>
-                            </View>
-                        )}
-                    </View>
-                ) : (
-                    <View style={[styles.card, { padding: 20, alignItems: 'center' }]}>
-                        <ActivityIndicator size="small" color="#8B0000" />
-                    </View>
-                )}
-
-                {/* 3. Project-Wise Detailed Status */}
-                <Text style={styles.sectionTitle}>{fromDate && toDate ? "Project Activity (Selected Period)" : "Project Status"}</Text>
-                {reportData.projectSummary.map((project: any) => (
-                    <View key={project.id} style={styles.projectCard}>
-                        <TouchableOpacity style={styles.projectHeader} onPress={() => toggleProject(project.id)}>
-                            <View style={{ flex: 1 }}>
-                                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                                    <View>
-                                        <Text style={styles.projectName}>{project.name}</Text>
-                                        <Text style={styles.projectLoc}>{project.location}</Text>
-                                    </View>
-                                    <View style={{ alignItems: 'flex-end' }}>
-                                        {/* In Date Mode, hide "Active" badge if it's confusing, or show Period Stats? */}
-                                        {/* User wants "Date Wise Report", so maybe show "Tasks: X" as the hero number */}
-                                        {fromDate && toDate ? (
-                                            <View>
-                                                <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#374151', textAlign: 'right' }}>
-                                                    {project.completed_tasks} Task{project.completed_tasks !== 1 ? 's' : ''}
-                                                </Text>
-                                                <Text style={{ fontSize: 10, color: '#6B7280' }}>Completed</Text>
-                                            </View>
-                                        ) : (
-                                            <>
-                                                <StatusBadge status={project.status} />
-                                                <Text style={styles.projectProgress}>{project.progress}%</Text>
-                                            </>
-                                        )}
-                                    </View>
-                                </View>
-                                <View style={{ marginTop: 8 }}>
-                                    {/* Hide Overall Bar in Date Mode to prevent "100%" confusion */}
-                                    {!(fromDate && toDate) && (
-                                        <ProgressBar
-                                            percentage={project.progress}
-                                            color={project.progress >= 100 ? '#059669' : '#2563EB'}
-                                            height={6}
-                                        />
-                                    )}
-                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
-                                        {fromDate && toDate ? (
-                                            <>
-                                                <Text style={{ fontSize: 11, color: '#6B7280' }}>Status: {project.status.toUpperCase()}</Text>
-                                                <Text style={{ fontSize: 11, color: '#374151', fontWeight: '500' }}>Overall Progress: {project.progress}%</Text>
-                                            </>
-                                        ) : (
-                                            <>
-                                                <Text style={{ fontSize: 10, color: '#6B7280' }}>Overall Progress</Text>
-                                                <Text style={{ fontSize: 11, color: '#374151', fontWeight: '500' }}>Completed (Period): {project.completed_tasks}/{project.total_tasks}</Text>
-                                            </>
-                                        )}
-                                    </View>
-                                </View>
-                            </View>
-                            <Ionicons name={expandedProjects[project.id] ? "chevron-up" : "chevron-down"} size={20} color="#6B7280" style={{ marginLeft: 12, alignSelf: 'center' }} />
-                        </TouchableOpacity>
-
-                        {/* Expanded Details */}
-                        {expandedProjects[project.id] && (
-                            <View style={styles.projectDetails}>
-                                <View style={styles.detailRow}>
-                                    <DetailItem label="Tasks Done" value={`${project.completed_tasks}/${project.total_tasks}`} />
-                                    <DetailItem label="Pending Approval" value={project.pending_approvals} color="#F59E0B" />
-                                </View>
-
-                                <Text style={styles.subHeader}>Phases</Text>
-                                {reportData.phaseSummary.filter((ph: any) => ph.site_id === project.id).map((phase: any) => (
-                                    <View key={phase.id} style={styles.phaseRow}>
-                                        <View style={{ flex: 1 }}>
-                                            <Text style={styles.phaseName}>{phase.name}</Text>
-                                            <Text style={styles.phaseBudget}>Bud: ₹{Number(phase.budget).toLocaleString()} | Used: ₹{Number(phase.amount_used).toLocaleString()}</Text>
-                                        </View>
-                                        <View style={{ alignItems: 'flex-end' }}>
-                                            <Text style={[styles.phaseStatus, { color: phase.is_over_budget ? '#DC2626' : '#059669' }]}>
-                                                {phase.progress}%
-                                            </Text>
-                                            {phase.pending_approvals > 0 && (
-                                                <Text style={{ fontSize: 10, color: '#D97706' }}>{phase.pending_approvals} Appr. Pend.</Text>
-                                            )}
-                                        </View>
-                                    </View>
-
-                                ))}
-
-                                <TouchableOpacity
-                                    style={{
-                                        marginTop: 12,
-                                        backgroundColor: '#E0E7FF',
-                                        padding: 10,
-                                        borderRadius: 8,
-                                        alignItems: 'center',
-                                        flexDirection: 'row',
-                                        justifyContent: 'center',
-                                        gap: 8
-                                    }}
-                                    onPress={() => navigation.navigate('EmployeeProjectDetails', { siteId: project.id, siteName: project.name })}
-                                >
-                                    <Text style={{ color: '#3730A3', fontWeight: '600', fontSize: 13 }}>View Full Dashboard</Text>
-                                    <Ionicons name="arrow-forward" size={16} color="#3730A3" />
-                                </TouchableOpacity>
-                            </View>
-                        )}
-                    </View>
-                ))
-                }
-
-                {/* 5. Task Analytics */}
-                <Text style={styles.sectionTitle}>Task Analytics</Text>
-                <View style={[styles.card, styles.gridCard]}>
-                    <StatBox label="Total" value={reportData.taskStatistics.total_tasks} />
-                    <StatBox label="Completed" value={reportData.taskStatistics.completed_tasks} color="#059669" />
-                    <StatBox label="Pending" value={reportData.taskStatistics.pending_tasks} color="#6B7280" />
-                    <StatBox label="Approved" value={reportData.taskStatistics.waiting_approval} color="#D97706" />
-                    <StatBox label="Overdue" value={reportData.taskStatistics.overdue_tasks} color="#DC2626" />
-                    <StatBox label="Avg (Days)" value={reportData.taskStatistics.avg_completion_time_days} />
-                    <View style={{ width: '100%', marginTop: 15, paddingHorizontal: 4 }}>
-                        <Text style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>Completion Rate</Text>
-                        <ProgressBar
-                            percentage={reportData.taskStatistics.total_tasks > 0 ? (reportData.taskStatistics.completed_tasks / reportData.taskStatistics.total_tasks) * 100 : 0}
-                            color="#3B82F6"
-                        />
-                    </View>
-                </View>
-
-                {/* 6. Material Overview */}
-                <Text style={styles.sectionTitle}>Materials & Resources</Text>
-                <View style={styles.card}>
-                    <View style={styles.row}>
-                        <View>
-                            <Text style={styles.statBig}>{reportData.materialOverview.total_requests}</Text>
-                            <Text style={styles.statLabel}>Total Requests</Text>
-                        </View>
-                        <View style={{ borderLeftWidth: 1, borderColor: '#eee', paddingLeft: 15 }}>
-                            <Text style={[styles.statBig, { color: '#059669' }]}>{reportData.materialOverview.delivered_requests}</Text>
-                            <Text style={styles.statLabel}>Delivered</Text>
-                        </View>
-                        <View style={{ borderLeftWidth: 1, borderColor: '#eee', paddingLeft: 15 }}>
-                            <Text style={[styles.statBig, { color: '#D97706' }]}>{reportData.materialOverview.pending_requests}</Text>
-                            <Text style={styles.statLabel}>Pending</Text>
-                        </View>
-                    </View>
-
-                </View>
-
-                {/* 7. Employee Performance */}
-                <Text style={styles.sectionTitle}>Employee Performance</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -16, paddingHorizontal: 16 }}>
-                    {reportData.employeePerformance.map((emp: any) => (
-                        <View key={emp.id} style={styles.empCard}>
-                            <View style={styles.empHeader}>
-                                <View style={styles.avatar}>
-                                    <Text style={styles.avatarText}>{emp.name.substring(0, 1)}</Text>
-                                </View>
-                                <View>
-                                    <Text style={styles.empName}>{emp.name}</Text>
-                                    <Text style={styles.empRole}>{emp.role}</Text>
-                                </View>
-                            </View>
-                            <View style={styles.empStats}>
-                                <Text style={styles.esLabel}>Tasks: {emp.completed_tasks}/{emp.assigned_tasks}</Text>
-                                <Text style={styles.esLabel}>Overdue: <Text style={{ color: emp.overdue_tasks > 0 ? 'red' : '#666' }}>{emp.overdue_tasks}</Text></Text>
-                            </View>
-                            <View style={[styles.perfBadge, { backgroundColor: emp.performance_status === 'Good' ? '#D1FAE5' : emp.performance_status === 'Average' ? '#FEF3C7' : '#FEE2E2' }]}>
-                                <Text style={{ fontSize: 10, color: emp.performance_status === 'Good' ? '#065F46' : emp.performance_status === 'Average' ? '#92400E' : '#991B1B' }}>
-                                    {(emp.performance_status || 'Poor').toUpperCase()}
-                                </Text>
-                            </View>
-                        </View>
-                    ))}
-                </ScrollView>
-
-
-
-
-
-                <View style={{ height: 50 }} />
-            </ScrollView >
-        </View >
-    );
-};
-
-// Helper Components
-const KpiCard = ({ label, value, icon, color, isAlert }: any) => (
-    <View style={[styles.kpiCard, isAlert && { borderColor: color, borderWidth: 1 }]}>
-        <View style={[styles.iconBox, { backgroundColor: color + '20' }]}>
-            <Ionicons name={icon} size={20} color={color} />
-        </View>
-        <Text style={styles.kpiValue}>{value}</Text>
-        <Text style={styles.kpiLabel}>{label}</Text>
-    </View>
-);
-
-const DetailItem = ({ label, value, color = '#374151' }: any) => (
-    <View style={{ alignItems: 'center' }}>
-        <Text style={[styles.detailVal, { color }]}>{value}</Text>
-        <Text style={styles.detailLbl}>{label}</Text>
-    </View>
-);
-
-const StatusBadge = ({ status }: any) => {
-    let color = '#6B7280';
-    let bg = '#F3F4F6';
-    if (status === 'active') { color = '#059669'; bg = '#D1FAE5'; }
-    if (status === 'completed') { color = '#2563EB'; bg = '#DBEAFE'; }
-    if (status === 'delayed') { color = '#DC2626'; bg = '#FEE2E2'; }
-    return (
-        <View style={[styles.badge, { backgroundColor: bg }]}>
-            <Text style={{ color, fontSize: 10, fontWeight: 'bold' }}>{status.toUpperCase()}</Text>
         </View>
     );
 };
 
-const StatBox = ({ label, value, color = '#111827' }: any) => (
-    <View style={styles.statBox}>
-        <Text style={[styles.statBoxVal, { color }]}>{value}</Text>
-        <Text style={styles.statBoxLbl}>{label}</Text>
-    </View>
-);
-
-const AuditItem = ({ label, value }: any) => (
-    <View style={{ flex: 1, alignItems: 'center' }}>
-        <Text style={{ fontWeight: 'bold', fontSize: 16 }}>{value}</Text>
-        <Text style={{ fontSize: 11, color: '#666', textAlign: 'center' }}>{label}</Text>
-    </View>
-);
-
+// --- Styles ---
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#F9FAFB' },
     center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#E5E7EB', paddingTop: 50 },
-    backButton: { padding: 4 },
+    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, backgroundColor: '#fff', elevation: 2 },
     headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#111827' },
-    iconBtn: { padding: 4 },
+    filterRow: { flexDirection: 'row', justifyContent: 'space-between', padding: 12, backgroundColor: '#fff', borderBottomWidth: 1, borderColor: '#eee' },
+    dateBtn: { backgroundColor: '#F3F4F6', padding: 6, borderRadius: 6, paddingHorizontal: 10 },
+    dateText: { fontSize: 12, color: '#333' },
+    projectFilterBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#EFF6FF', padding: 6, paddingHorizontal: 12, borderRadius: 20, gap: 4 },
     content: { padding: 16 },
-    sectionTitle: { fontSize: 18, fontWeight: '700', color: '#111827', marginTop: 20, marginBottom: 12 },
-    sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+    sectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#111827', marginTop: 20, marginBottom: 12 },
+    rowWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
 
-    kpiScroll: { marginHorizontal: -16, paddingHorizontal: 16, paddingBottom: 10 },
-    kpiCard: { backgroundColor: '#fff', padding: 12, borderRadius: 12, marginRight: 12, width: 140, elevation: 2, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5 },
-    iconBox: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
-    kpiValue: { fontSize: 22, fontWeight: 'bold', color: '#1F2937' },
-    kpiLabel: { fontSize: 12, color: '#6B7280' },
+    // KPI Card
+    kpiCard: { width: '48%', backgroundColor: '#fff', padding: 12, borderRadius: 10, flexDirection: 'row', alignItems: 'center', borderLeftWidth: 4, elevation: 1, marginBottom: 10 },
+    iconCircle: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
+    kpiValue: { fontSize: 18, fontWeight: 'bold', color: '#1F2937' },
+    kpiLabel: { fontSize: 11, color: '#6B7280' },
 
-    card: { backgroundColor: '#fff', borderRadius: 12, padding: 16, elevation: 1 },
-    finRow: { flexDirection: 'row', justifyContent: 'space-between' },
-    finItem: { flex: 1 },
-    finLabel: { fontSize: 12, color: '#6B7280', marginBottom: 2 },
-    finValue: { fontSize: 16, fontWeight: '600', color: '#111827' },
-    divider: { height: 1, backgroundColor: '#E5E7EB', marginVertical: 12 },
-    balanceLabel: { fontSize: 14, fontWeight: '500', color: '#374151' },
-    balanceValue: { fontSize: 20, fontWeight: 'bold' },
-    alertBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEE2E2', padding: 8, borderRadius: 8, marginTop: 12 },
-    alertText: { color: '#B91C1C', fontSize: 12, marginLeft: 6, fontWeight: '500' },
+    // Action Panel
+    actionPanel: { backgroundColor: '#FEF2F2', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#FCA5A5', marginTop: 10 },
+    actionTitle: { fontSize: 14, fontWeight: 'bold', color: '#991B1B', marginLeft: 6 },
+    actionItem: { flexDirection: 'row', marginTop: 6, gap: 8 },
+    actionText: { fontSize: 13, color: '#7F1D1D', flex: 1 },
 
-    projectCard: { backgroundColor: '#fff', borderRadius: 12, marginBottom: 12, overflow: 'hidden', elevation: 1 },
-    projectHeader: { flexDirection: 'row', padding: 16, alignItems: 'center' },
-    projectName: { fontSize: 16, fontWeight: '600', color: '#111827' },
-    projectLoc: { fontSize: 12, color: '#6B7280' },
-    projectProgress: { fontSize: 12, color: '#059669', fontWeight: 'bold', marginTop: 2 },
-    badge: { borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
+    // Project Card
+    projectCardCompact: { backgroundColor: '#fff', padding: 12, borderRadius: 8, marginBottom: 10, elevation: 1 },
+    projName: { fontSize: 14, fontWeight: '600', color: '#111827' },
+    projLoc: { fontSize: 11, color: '#666' },
 
-    projectDetails: { backgroundColor: '#F9FAFB', padding: 16, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
-    detailRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
-    detailVal: { fontSize: 14, fontWeight: 'bold' },
-    detailLbl: { fontSize: 11, color: '#6B7280' },
-    subHeader: { fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 8 },
-    phaseRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
-    phaseName: { fontSize: 13, color: '#1F2937' },
-    phaseBudget: { fontSize: 11, color: '#6B7280' },
-    phaseStatus: { fontSize: 12, fontWeight: 'bold' },
+    // General
+    card: { backgroundColor: '#fff', padding: 15, borderRadius: 10, elevation: 1, marginBottom: 10 },
+    achievementBanner: { backgroundColor: '#ECFDF5', padding: 10, borderRadius: 8, marginBottom: 10, borderLeftWidth: 4, borderLeftColor: '#10B981' },
+    achievementText: { fontSize: 12, color: '#065F46', marginBottom: 2 },
+    statBig: { fontSize: 20, fontWeight: 'bold', color: '#333' },
+    statLabel: { fontSize: 11, color: '#666' },
 
-    gridCard: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'space-between' },
-    statBox: { width: '30%', alignItems: 'center', paddingVertical: 8 },
-    statBoxVal: { fontSize: 18, fontWeight: 'bold' },
-    statBoxLbl: { fontSize: 11, color: '#6B7280' },
+    // Financials
+    finLabel: { fontSize: 12, color: '#6B7280' },
+    finValue: { fontSize: 16, fontWeight: 'bold', color: '#1F2937' },
 
-    row: { flexDirection: 'row', justifyContent: 'space-around' },
-    statBig: { fontSize: 20, fontWeight: 'bold', color: '#111827' },
-    statLabel: { fontSize: 12, color: '#6B7280' },
-
-    empCard: { width: 160, backgroundColor: '#fff', padding: 12, borderRadius: 12, marginRight: 12, elevation: 1 },
-    empHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-    avatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#4F46E5', justifyContent: 'center', alignItems: 'center', marginRight: 8 },
-    avatarText: { color: '#fff', fontWeight: 'bold' },
-    empName: { fontSize: 13, fontWeight: '600', color: '#1F2937', width: 90 },
-    empRole: { fontSize: 10, color: '#6B7280' },
-    empStats: { marginBottom: 8 },
-    esLabel: { fontSize: 11, color: '#4B5563', marginBottom: 2 },
-    perfBadge: { alignSelf: 'flex-start', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-
-    riskRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-    riskText: { marginLeft: 8, fontSize: 13, color: '#374151' },
-
-    lastAction: { fontSize: 11, color: '#9CA3AF', textAlign: 'center', marginTop: 10 },
-
-    filterRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 12, gap: 10 },
-    dateBtn: { flexDirection: 'row', backgroundColor: '#fff', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, alignItems: 'center', gap: 6, borderWidth: 1, borderColor: '#E5E7EB' },
-    dateText: { fontSize: 13, color: '#374151' },
-    clearBtn: { backgroundColor: '#9CA3AF', padding: 4, borderRadius: 10 },
-
-    // Modal Styles
+    // Modal
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
-    modalContent: { width: '85%', maxHeight: '60%', backgroundColor: '#fff', borderRadius: 12, padding: 20, elevation: 5 },
-    modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#111827', marginBottom: 15, textAlign: 'center' },
-    projectOption: { paddingVertical: 12, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: '#F3F4F6', fontSize: 16, color: '#374151' },
-    selectedOption: { color: '#2563EB', fontWeight: 'bold', backgroundColor: '#EFF6FF' },
-    closeButton: { marginTop: 15, backgroundColor: '#8B0000', padding: 12, borderRadius: 8, alignItems: 'center' },
-    closeButtonText: { color: '#fff', fontWeight: 'bold' }
+    modalContent: { width: '80%', backgroundColor: '#fff', borderRadius: 10, padding: 20, maxHeight: '60%' },
+    modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15 },
+    projectOption: { padding: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0', fontSize: 14 },
+    selectedOption: { backgroundColor: '#EFF6FF', color: '#2563EB', fontWeight: 'bold' },
+    closeButton: { marginTop: 15, alignSelf: 'center', padding: 10 },
+    closeButtonText: { color: '#666' },
+
+    // Employee Row Styles (Compact)
+    empRow: {
+        backgroundColor: '#fff', padding: 12, marginBottom: 8, borderRadius: 8,
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+        borderBottomWidth: 1, borderBottomColor: '#F3F4F6'
+    },
+    empNameCompact: { fontSize: 13, fontWeight: '700', color: '#1F2937' },
+    empRoleCompact: { fontSize: 11, color: '#6B7280' },
+
+    statCompact: { alignItems: 'center', marginHorizontal: 4 },
+    statValCompact: { fontSize: 13, fontWeight: 'bold', color: '#374151' },
+    statLblCompact: { fontSize: 9, color: '#9CA3AF' },
+
+    ratingBadge: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10 },
+    ratingText: { fontSize: 10, fontWeight: '700' },
+
+    // Controls
+    sortBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: '#F3F4F6', marginRight: 8 },
+    sortBtnActive: { backgroundColor: '#DBEAFE' },
+    sortBtnText: { fontSize: 11, color: '#4B5563' },
+    sortBtnTextActive: { color: '#1E40AF', fontWeight: 'bold' },
 });
 
 export default OverallReportScreen;

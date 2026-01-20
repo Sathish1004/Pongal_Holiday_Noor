@@ -41,11 +41,28 @@ const AddMilestoneModal: React.FC<AddMilestoneModalProps> = ({
         }
     }, [visible, milestoneData, projectPhases]);
 
+    const isValidDate = (dateString: string) => {
+        // Regex check for format YYYY-MM-DD
+        const regex = /^\d{4}-\d{2}-\d{2}$/;
+        if (!regex.test(dateString)) return false;
+
+        // Logical check for real dates (e.g., preventing Feb 30)
+        const [y, m, d] = dateString.split('-').map(Number);
+        const date = new Date(y, m - 1, d);
+        return date.getFullYear() === y && date.getMonth() + 1 === m && date.getDate() === d;
+    };
+
     const handleSave = async () => {
         if (!name.trim()) {
             Alert.alert("Error", "Please enter a milestone name");
             return;
         }
+
+        if (!isValidDate(plannedEndDate)) {
+            Alert.alert("Invalid Date", "Please enter a valid date in YYYY-MM-DD format.\n(e.g., Feb 30 does not exist)");
+            return;
+        }
+
         setLoading(true);
         try {
             await onSave({

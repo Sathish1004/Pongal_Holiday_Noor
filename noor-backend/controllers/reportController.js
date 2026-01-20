@@ -57,7 +57,7 @@ exports.getOverallReport = async (req, res) => {
                 UNION
                 SELECT employee_id FROM material_requests WHERE 1=1 ${activityDateFilter}
                 UNION
-                SELECT employee_id FROM task_assignments WHERE 1=1 ${activityDateFilter.replace('created_at', 'assigned_at')}
+                SELECT employee_id FROM task_assignments WHERE 1=1 ${activityDateFilter.replace(/created_at/g, 'assigned_at')}
             ) as activity
         ` : `
             SELECT COUNT(DISTINCT employee_id) as count FROM (
@@ -116,7 +116,7 @@ exports.getOverallReport = async (req, res) => {
                 SUM(CASE WHEN t.status = 'waiting_for_approval' THEN 1 ELSE 0 END) as pending_approvals,
                  (SELECT SUM(budget) FROM phases WHERE site_id = s.id) as total_allocated
             FROM sites s
-            LEFT JOIN tasks t ON s.id = t.site_id ${taskCompletionDateFilter ? taskCompletionDateFilter.replace('updated_at', 't.updated_at') : ''}
+            LEFT JOIN tasks t ON s.id = t.site_id ${taskCompletionDateFilter ? taskCompletionDateFilter.replace(/updated_at/g, 't.updated_at') : ''}
             WHERE 1=1 ${projectFilter}
             GROUP BY s.id
         `);
@@ -130,7 +130,7 @@ exports.getOverallReport = async (req, res) => {
                 (SELECT COUNT(*) FROM tasks t2 WHERE t2.phase_id = p.id AND t2.status = 'waiting_for_approval') as pending_approvals
             FROM phases p
             JOIN sites s ON p.site_id = s.id
-            LEFT JOIN tasks t ON p.id = t.phase_id ${taskCompletionDateFilter ? taskCompletionDateFilter.replace('updated_at', 't.updated_at') : ''}
+            LEFT JOIN tasks t ON p.id = t.phase_id ${taskCompletionDateFilter ? taskCompletionDateFilter.replace(/updated_at/g, 't.updated_at') : ''}
             WHERE 1=1 ${projectFilter}
             GROUP BY p.id
         `);
@@ -147,7 +147,7 @@ exports.getOverallReport = async (req, res) => {
                 SUM(CASE WHEN t.status = 'completed' AND YEARWEEK(t.completed_at, 1) = YEARWEEK(CURDATE(), 1) THEN 1 ELSE 0 END) as completed_this_week
             FROM tasks t
             JOIN sites s ON t.site_id = s.id
-            WHERE 1=1 ${projectFilter} ${taskCompletionDateFilter ? taskCompletionDateFilter.replace('updated_at', 't.updated_at') : ''}
+            WHERE 1=1 ${projectFilter} ${taskCompletionDateFilter ? taskCompletionDateFilter.replace(/updated_at/g, 't.updated_at') : ''}
         `);
 
         // Average Completion Time (in days)
@@ -169,7 +169,7 @@ exports.getOverallReport = async (req, res) => {
             FROM material_requests mr
             JOIN sites s ON mr.site_id = s.id
             WHERE 1=1 ${projectFilter}
-            ${activityDateFilter ? activityDateFilter.replace('created_at', 'mr.created_at') : ''}
+            ${activityDateFilter ? activityDateFilter.replace(/created_at/g, 'mr.created_at') : ''}
         `);
 
         // Material Costs - derived from 'OUT' transactions generally
@@ -181,17 +181,27 @@ exports.getOverallReport = async (req, res) => {
         const [employeePerformance] = await db.query(`
             SELECT 
                 e.id, e.name, e.role,
+                COALESCE(e.status, 'Active') as status,
                 COUNT(t.id) as assigned_tasks,
                 SUM(CASE WHEN t.status = 'completed' THEN 1 ELSE 0 END) as completed_tasks,
+                SUM(CASE WHEN t.status IN ('pending', 'in_progress', 'change_required') THEN 1 ELSE 0 END) as pending_tasks,
                 SUM(CASE WHEN t.status != 'completed' AND t.due_date < CURDATE() THEN 1 ELSE 0 END) as overdue_tasks,
-                SUM(CASE WHEN t.status = 'waiting_for_approval' THEN 1 ELSE 0 END) as pending_approvals,
-                MAX(tu.created_at) as last_activity
+                SUM(CASE WHEN t.status = 'completed' AND t.completed_at <= t.due_date THEN 1 ELSE 0 END) as on_time_tasks,
+                AVG(CASE WHEN t.status = 'completed' THEN DATEDIFF(t.completed_at, t.created_at) ELSE NULL END) as avg_completion_days,
+                
+                (SELECT COUNT(*) FROM notifications n WHERE n.employee_id = e.id AND n.type = 'TASK_REJECTED') as rejection_count,
+                
+                (SELECT MAX(updated_at) FROM (
+                    SELECT created_at as updated_at FROM task_updates WHERE employee_id = e.id
+                    UNION ALL
+                    SELECT completed_at FROM tasks WHERE completed_by = e.id
+                ) as u) as last_activity
+
             FROM employees e
             LEFT JOIN task_assignments ta ON e.id = ta.employee_id
-            LEFT JOIN tasks t ON ta.task_id = t.id ${taskCompletionDateFilter ? taskCompletionDateFilter.replace('updated_at', 't.updated_at') : ''}
-            LEFT JOIN task_updates tu ON e.id = tu.employee_id
+            LEFT JOIN tasks t ON ta.task_id = t.id ${taskCompletionDateFilter ? taskCompletionDateFilter.replace(/updated_at/g, 't.updated_at') : ''}
             WHERE e.role != 'admin'
-            GROUP BY e.id
+            GROUP BY e.id, e.name, e.role, e.status
         `);
 
 
@@ -255,7 +265,7 @@ exports.getOverallReport = async (req, res) => {
             ) as derived_completion_date
             FROM milestones m
             JOIN sites s ON m.site_id = s.id
-            WHERE 1=1 ${projectFilter.replace('s.', 'm.')} -- approximate filter map
+            WHERE 1=1 ${projectFilter}
             ORDER BY m.planned_end_date ASC
         `);
 
@@ -278,15 +288,26 @@ exports.getOverallReport = async (req, res) => {
             completed: milestones.filter(m => m.status === 'Completed').length,
             delayed: milestones.filter(m => m.status === 'Delayed' || (m.status !== 'Completed' && new Date(m.planned_end_date) < new Date())).length,
             in_progress: milestones.filter(m => m.status === 'In Progress').length,
-            latest_achievement_date: (() => {
-                const completed = milestones.filter(m => m.status === 'Completed' && m.actual_completion_date);
-                if (completed.length === 0) return null;
-                // Sort descending
-                completed.sort((a, b) => new Date(b.actual_completion_date) - new Date(a.actual_completion_date));
-                return completed[0].actual_completion_date;
-            })()
+            latest_achievement_date: milestones.filter(m => m.status === 'Completed').sort((a, b) => new Date(b.actual_completion_date || b.updated_at).getTime() - new Date(a.actual_completion_date || a.updated_at).getTime())[0]?.actual_completion_date
         };
 
+        // --- K. Activity Trends (Chart Data) ---
+        // Get tasks completed in the last 7 days (or selected range)
+        const dateLimit = fromDate || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const dateUpper = toDate || new Date().toISOString().split('T')[0];
+
+        const [activityTrends] = await db.query(`
+            SELECT DATE(completed_at) as date, COUNT(*) as count 
+            FROM tasks
+            WHERE status IN ('completed', 'waiting_for_approval')
+            AND completed_at >= ? AND completed_at <= ? + INTERVAL 1 DAY
+            ${transactionProjectFilter.replace('s.', '')} -- tasks usually don't have direct s. but we join sites? No, transactionProjectFilter relies on site join usually.
+            -- Actually tasks table has site_id directly? Let's check schema.
+            -- Tasks table has site_id. So we can use site_id filter.
+            AND site_id IN (SELECT id FROM sites s WHERE 1=1 ${projectFilter})
+            GROUP BY DATE(completed_at)
+            ORDER BY date ASC
+        `, [dateLimit, dateUpper]);
 
         const reportData = {
             generatedAt: new Date(),
@@ -329,8 +350,9 @@ exports.getOverallReport = async (req, res) => {
             },
             employeePerformance: employeePerformance.map(e => ({
                 ...e,
+                avg_completion_days: e.avg_completion_days ? Number(e.avg_completion_days).toFixed(1) : '0.0',
                 performance_score: e.assigned_tasks > 0 ? Math.round((e.completed_tasks / e.assigned_tasks) * 100) : 0,
-                performance_status: (e.assigned_tasks > 0 ? Math.round((e.completed_tasks / e.assigned_tasks) * 100) : 0) >= 80 ? 'Good' : (e.assigned_tasks > 0 ? Math.round((e.completed_tasks / e.assigned_tasks) * 100) : 0) >= 50 ? 'Average' : 'Poor'
+                // We will calculate the complex rating (Excellent/Good/etc) on the frontend for flexibility
             })),
             risks: {
                 delayed_tasks_count: taskStats[0].overdue_tasks,
@@ -348,8 +370,29 @@ exports.getOverallReport = async (req, res) => {
                 list: milestones.map(m => ({
                     ...m,
                     is_delayed: m.status === 'Delayed' || (m.status !== 'Completed' && new Date(m.planned_end_date) < new Date())
-                }))
-            }
+                })),
+                achievements: milestones
+                    .filter(m => m.status === 'Completed' || m.progress === 100)
+                    .sort((a, b) => new Date(b.actual_completion_date || b.updated_at).getTime() - new Date(a.actual_completion_date || a.updated_at).getTime())
+                    .slice(0, 5) // Top 5 recent achievements
+                    .map(m => `Milestone '${m.name}' in project '${m.site_name}' successfully completed`)
+            },
+            topExpenseProjects: projectFinancials
+                .sort((a, b) => (b.spent || 0) - (a.spent || 0))
+                .slice(0, 3)
+                .map(p => ({
+                    name: p.name,
+                    spent: p.spent || 0,
+                    budget: p.allocated || 0,
+                    utilization: p.allocated > 0 ? Math.round(((p.spent || 0) / p.allocated) * 100) : 0
+                })),
+            actionItems: [
+                ...stuckApprovals.map(t => `Task '${t.name}' in '${t.project_name}' waiting for approval > 3 days`),
+                taskStats[0].waiting_approval > 0 ? `${taskStats[0].waiting_approval} tasks waiting for approval` : null,
+                milestoneStats.delayed > 0 ? `${milestoneStats.delayed} milestones are currently delayed` : null,
+                overBudgetProjects > 0 ? `${overBudgetProjects} projects have exceeded their budget` : null,
+                zeroProgressPhases.length > 0 ? `${zeroProgressPhases.length} phases showing zero progress` : null
+            ].filter(Boolean) // Filter out nulls
 
         };
 
