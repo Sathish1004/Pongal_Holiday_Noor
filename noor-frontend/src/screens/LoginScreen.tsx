@@ -1,5 +1,5 @@
 import React, { useState, useContext } from 'react';
-import { View, Text, TextInput, TouchableOpacity, SafeAreaView, StyleSheet, StatusBar, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, SafeAreaView, StyleSheet, StatusBar, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { AuthContext } from '../context/AuthContext';
 import api from '../services/api';
@@ -49,9 +49,11 @@ const LoginScreen = ({ navigation }: any) => {
                         {/* Header */}
                         <View style={styles.header}>
                             <View style={styles.logoContainer}>
-                                <View style={styles.logoIcon}>
-                                    <Ionicons name="business" size={40} color="#3B82F6" />
-                                </View>
+                                <Image
+                                    source={require('../../assets/noor-logo.png')}
+                                    style={styles.logoImage}
+                                    resizeMode="contain"
+                                />
                             </View>
                             <Text style={styles.title}>Welcome</Text>
                             <Text style={styles.subtitle}>Sign in to your account</Text>
@@ -172,16 +174,11 @@ const styles = StyleSheet.create({
     },
     logoContainer: {
         marginBottom: 20,
-    },
-    logoIcon: {
-        width: 80,
-        height: 80,
-        borderRadius: 20,
-        backgroundColor: '#FAFAFA',
         alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 1,
-        borderColor: '#EEEEEE',
+    },
+    logoImage: {
+        width: 180,
+        height: 180,
     },
     title: {
         fontSize: 28,
@@ -252,12 +249,12 @@ const styles = StyleSheet.create({
         padding: 8,
     },
     loginButton: {
-        backgroundColor: '#3B82F6',
+        backgroundColor: '#FFB6C1',
         paddingVertical: 16,
         borderRadius: 14,
         alignItems: 'center',
         marginTop: 24,
-        shadowColor: '#3B82F6',
+        shadowColor: '#FFC0CB',
         shadowOffset: { width: 0, height: 6 },
         shadowOpacity: 0.2,
         shadowRadius: 12,
